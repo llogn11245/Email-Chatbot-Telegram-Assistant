@@ -25,7 +25,7 @@ _SETTINGS_FIELDS = {
     "llm_provider",
     "llm_model",
     "llm_api_key",
-    "llm_base_url",
+    # "llm_base_url",
     "gcp_client_id",
     "gcp_client_secret",
     "gmail_refresh_token",

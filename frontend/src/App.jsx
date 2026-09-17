@@ -23,7 +23,7 @@ export default function App() {
   const [status, setStatus] = useState(null)
   const [message, setMessage] = useState(null)
   const [bot, setBot] = useState({ token: '' })
-  const [llm, setLlm] = useState({ provider: 'openai', model: '', api_key: '', base_url: '' })
+  const [llm, setLlm] = useState({ provider: 'openai', model: '', api_key: ''})
   const [gcp, setGcp] = useState({ client_id: '', client_secret: '', json: '' })
   const [busy, setBusy] = useState(false)
 
@@ -40,7 +40,6 @@ export default function App() {
       ...prev,
       provider: data.llm.provider || prev.provider || 'openai',
       model: data.llm.model || prev.model,
-      base_url: data.llm.base_url || prev.base_url,
     }))
   }, [])
 
@@ -71,7 +70,6 @@ export default function App() {
     setLlm((prev) => ({
       ...prev,
       provider,
-      base_url: preset.baseUrl,
       model: preset.models.includes(prev.model) ? prev.model : preset.models[0] || '',
     }))
   }
@@ -209,13 +207,6 @@ export default function App() {
               value={llm.api_key}
               placeholder="sk-..."
               onChange={(e) => setLlm({ ...llm, api_key: e.target.value })}
-            />
-          </Field>
-          <Field label={tr('base_url')}>
-            <input
-              value={llm.base_url}
-              placeholder="https://api.openai.com/v1"
-              onChange={(e) => setLlm({ ...llm, base_url: e.target.value })}
             />
           </Field>
         </div>
