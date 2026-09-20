@@ -8,7 +8,9 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend import config, gmail_client, gmail_oauth, i18n, storage
+from backend import config, storage
+from backend.email_services import gmail_client
+from backend.web import oauth
 
 _bot_manager = None
 
@@ -39,65 +41,9 @@ class GcpSetupBody(BaseModel):
     client_secret_json: str | None = None
 
 
-def _gcp_credentials() -> tuple[str, str]:
-    settings = storage.get_settings()
-    client_id = config.GOOGLE_CLIENT_ID or settings.get("gcp_client_id")
-    client_secret = config.GOOGLE_CLIENT_SECRET or settings.get("gcp_client_secret")
-    if not (client_id and client_secret):
-        raise HTTPException(status_code=400, detail="Chưa có OAuth client. Hãy hoàn tất bước OAuth.")
-    return client_id, client_secret
-
-
 def _require_admin(token: str | None = Header(default=None)) -> None:
     if config.ADMIN_PASSWORD and token != config.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Sai token quản trị.")
-
-
-def _oauth_done_page(title: str, message: str) -> HTMLResponse:
-    back = i18n.t("back_to_panel")
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="vi"><head><meta charset="utf-8">
-    <title>{title}</title>
-    <style>body{{font-family:sans-serif;display:flex;align-items:center;justify-content:center;
-    height:100vh;margin:0;background:#f5f7fa}} .card{{background:#fff;padding:32px;border-radius:12px;
-    box-shadow:0 2px 12px rgba(0,0,0,.08);text-align:center;max-width:420px}}
-    a{{display:inline-block;margin-top:16px;color:#1a73e8;text-decoration:none}}</style></head>
-    <body><div class="card"><h2>{title}</h2><p>{message}</p>
-    <a href="/">{back}</a></div></body></html>
-    """
-    return HTMLResponse(html)
-
-
-def _finalize_oauth(code: str | None, error: str | None) -> HTMLResponse:
-    lang = i18n.current_language()
-    client_id, client_secret = _gcp_credentials()
-    if error:
-        return _oauth_done_page(
-            i18n.t("oauth_fail_title", lang), f"{i18n.t('oauth_google_error', lang)} {error}"
-        )
-    if not code:
-        return _oauth_done_page(i18n.t("oauth_fail_title", lang), i18n.t("oauth_missing_code", lang))
-    try:
-        refresh_token = gmail_oauth.exchange_code(
-            code, client_id, client_secret, config.REDIRECT_URI
-        )
-        storage.update_settings(gmail_refresh_token=refresh_token)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        return _oauth_done_page(
-            i18n.t("oauth_fail_title", lang), f"{i18n.t('oauth_exchange_error', lang)} {exc}"
-        )
-    try:
-        email = gmail_client.get_profile_email()
-        storage.update_settings(gmail_email=email)
-    except Exception:
-        email = ""
-    text = f"{i18n.t('oauth_connected', lang)} {email}." if email else f"{i18n.t('oauth_connected', lang)}."
-    return _oauth_done_page(
-        i18n.t("oauth_ok_title", lang), f"{text} {i18n.t('oauth_close', lang)}"
-    )
 
 
 def create_app() -> FastAPI:
@@ -201,12 +147,12 @@ def create_app() -> FastAPI:
 
     @app.post("/api/oauth/start")
     def oauth_start():
-        client_id, _ = _gcp_credentials()
-        return {"url": gmail_oauth.build_auth_url(client_id, config.REDIRECT_URI)}
+        client_id, _ = oauth.get_gcp_credentials()
+        return {"url": oauth.build_auth_url(client_id, config.REDIRECT_URI)}
 
     @app.get("/oauth2callback")
     def oauth_callback(code: str | None = Query(default=None), error: str | None = Query(default=None)):
-        return _finalize_oauth(code, error)
+        return oauth.finalize_oauth(code, error)
 
     assets_dir = config.FRONTEND_DIST / "assets"
     if assets_dir.is_dir():
@@ -217,7 +163,7 @@ def create_app() -> FastAPI:
     @app.get("/", include_in_schema=False)
     def root(code: str | None = Query(default=None), error: str | None = Query(default=None)):
         if code or error:
-            return _finalize_oauth(code, error)
+            return oauth.finalize_oauth(code, error)
         if index_file.is_file():
             return FileResponse(str(index_file))
         return HTMLResponse(

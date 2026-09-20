@@ -6,7 +6,13 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from backend import storage
-from backend.gmail_oauth import GMAIL_SCOPES, TOKEN_URI
+
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+]
+AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 _cache: dict = {"refresh_token": None, "service": None}
 

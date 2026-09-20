@@ -1,11 +1,13 @@
 import asyncio
+from urllib.parse import urlparse
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from backend import config, gmail_client, i18n, storage
+from backend import config, i18n, storage
 from backend.agent.graph import SetupError, run_agent
+from backend.email_services import gmail_client
 
 rt = Router()
 
@@ -18,7 +20,23 @@ def _allowed(user_id: int | None) -> bool:
     return user_id == config.TELEGRAM_ADMIN_ID
 
 
-def _setup_keyboard(lang: str) -> InlineKeyboardMarkup:
+def _is_public_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    return host not in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+def _setup_keyboard(lang: str):
+    # Telegram từ chối URL localhost trong inline button, nên chỉ gắn nút khi URL public.
+    if not _is_public_url(config.WEB_URL):
+        return None
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=i18n.t("open_panel", lang), url=config.WEB_URL)]
@@ -37,7 +55,10 @@ async def cmd_start(message: types.Message):
     if not _allowed(message.from_user.id):
         return
     lang = i18n.current_language()
-    await message.answer(i18n.t("start", lang), reply_markup=_setup_keyboard(lang))
+    await message.answer(
+        f"{i18n.t('start', lang)}\n\n{i18n.t('open_panel_hint', lang)} {config.WEB_URL}",
+        reply_markup=_setup_keyboard(lang),
+    )
 
 
 @rt.message(Command("setup"))

@@ -2,7 +2,8 @@ import json
 
 from langchain_core.tools import tool
 
-from backend import gmail_client, storage
+from backend import storage
+from backend.email_services import gmail_client
 
 
 def _dumps(data) -> str:
