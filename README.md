@@ -4,7 +4,7 @@ Agent AI tự-host giúp bạn làm việc với Gmail qua **Telegram**: tìm v�
 
 - **Chat front:** Telegram bot
 - **Control panel:** Web (FastAPI + React) để nhập **bot token**, **API key LLM**, và kết nối Gmail — không cần cấu hình gì trong `.env` cho các phần này
-- **Agent core:** LangGraph + tool-calling, dùng model qua API tương thích OpenAI (OpenAI, **DeepSeek**, OpenRouter, Groq, Ollama...)
+- **Agent core:** LangGraph + tool-calling, dùng model qua 4 nhà cung cấp: **OpenAI**, **DeepSeek**, **Claude** (Anthropic), **Gemini** (Google)
 - **Storage:** PostgreSQL, dữ liệu nhạy cảm mã hoá Fernet
 - **Đa ngôn ngữ:** Tiếng Việt / English (đổi trên web hoặc `/language` trong bot)
 
@@ -28,7 +28,7 @@ Web UI (React) ── FastAPI ─┘         │
 
 - Docker & Docker Compose (đã gồm PostgreSQL)
 - Tài khoản Telegram (tạo bot với @BotFather)
-- Một model qua API OpenAI-compatible (DeepSeek, OpenAI, OpenRouter, Groq, Ollama...)
+- Một model của OpenAI / DeepSeek / Anthropic / Google Gemini (kèm API key tương ứng)
 - Tài khoản Google + OAuth Client ID loại **Desktop app** (tạo một lần, ~10 phút)
 
 ## Quickstart (Docker)
@@ -42,7 +42,7 @@ docker compose up -d --build
 Mở `http://localhost:8000`, làm 4 bước:
 
 1. **Bot Telegram** — tạo bot với @BotFather, dán token. Hệ thống kiểm tra token rồi tự khởi động bot.
-2. **Cấu hình LLM** — chọn provider (có sẵn **DeepSeek**) và model, dán API key.
+2. **Cấu hình mô hình AI** — chọn provider (OpenAI / DeepSeek / Claude / Gemini), model và dán API key; tuỳ chỉnh temperature, timeout, max_tokens, max_retries trong mục nâng cao.
 3. **Google OAuth client** — dán nội dung `client_secret.json`.
 4. **Connect Gmail** — đăng nhập Google, cho phép.
 
@@ -113,7 +113,7 @@ backend/
     manager.py           # start/stop/restart bot khi token thay đổi
     handlers.py          # Telegram: /setup /status /language, chat, xác nhận gửi
   agent/
-    llm.py               # ChatOpenAI (OpenAI-compatible, hỗ trợ DeepSeek)
+    llm.py               # init_chat_model (OpenAI/DeepSeek/Anthropic/Gemini) + tham số
     tools.py             # search_emails, read_email, request_send_email
     graph.py             # create_react_agent (LangGraph)
 frontend/                # React (Vite) control panel + i18n
@@ -131,6 +131,6 @@ Dockerfile
 
 ## Hạn chế đã biết
 
-- Chỉ hỗ trợ model OpenAI-compatible (chưa có Anthropic SDK riêng).
+- Hỗ trợ 4 nhà cung cấp: OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google).
 - App Google chưa verify nên consent screen có cảnh báo (không ảnh hưởng hoạt động).
 - Không lưu lịch sử hội thoại giữa các lần khởi động.

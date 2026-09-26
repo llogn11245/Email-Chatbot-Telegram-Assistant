@@ -25,7 +25,10 @@ _SETTINGS_FIELDS = {
     "llm_provider",
     "llm_model",
     "llm_api_key",
-    # "llm_base_url",
+    "llm_temperature",
+    "llm_timeout",
+    "llm_max_tokens",
+    "llm_max_retries",
     "gcp_client_id",
     "gcp_client_secret",
     "gmail_refresh_token",
@@ -48,6 +51,10 @@ class Settings(Base):
     llm_provider: Mapped[str] = mapped_column(String(32), default="")
     llm_model: Mapped[str] = mapped_column(String(128), default="")
     llm_api_key: Mapped[str] = mapped_column(Text, default="")
+    llm_temperature: Mapped[str] = mapped_column(String(16), default="")
+    llm_timeout: Mapped[str] = mapped_column(String(16), default="")
+    llm_max_tokens: Mapped[str] = mapped_column(String(16), default="")
+    llm_max_retries: Mapped[str] = mapped_column(String(16), default="")
     llm_base_url: Mapped[str] = mapped_column(String(256), default="")
     gcp_client_id: Mapped[str] = mapped_column(Text, default="")
     gcp_client_secret: Mapped[str] = mapped_column(Text, default="")
@@ -93,7 +100,21 @@ def _get_engine():
             kwargs["connect_args"] = {"check_same_thread": False}
         _engine = create_engine(url, **kwargs)
         Base.metadata.create_all(_engine)
+        _migrate(_engine)
     return _engine
+
+
+def _migrate(engine) -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "settings" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("settings")}
+    for column in ("llm_temperature", "llm_timeout", "llm_max_tokens", "llm_max_retries"):
+        if column not in existing:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE settings ADD COLUMN {column} VARCHAR(16) DEFAULT ''"))
 
 
 def _now() -> str:
@@ -117,6 +138,10 @@ def _serialize(row: Settings) -> dict:
         "llm_provider": row.llm_provider,
         "llm_model": row.llm_model,
         "llm_api_key": row.llm_api_key,
+        "llm_temperature": row.llm_temperature,
+        "llm_timeout": row.llm_timeout,
+        "llm_max_tokens": row.llm_max_tokens,
+        "llm_max_retries": row.llm_max_retries,
         "llm_base_url": row.llm_base_url,
         "gcp_client_id": row.gcp_client_id,
         "gcp_client_secret": row.gcp_client_secret,

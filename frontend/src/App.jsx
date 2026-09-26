@@ -9,13 +9,19 @@ function Chip({ ok, label }) {
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, hint, children }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
       {children}
+      {hint && <small className="field-hint">{hint}</small>}
     </label>
   )
+}
+
+function num(value, fallback) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
 }
 
 export default function App() {
@@ -23,7 +29,15 @@ export default function App() {
   const [status, setStatus] = useState(null)
   const [message, setMessage] = useState(null)
   const [bot, setBot] = useState({ token: '' })
-  const [llm, setLlm] = useState({ provider: 'openai', model: '', api_key: ''})
+  const [llm, setLlm] = useState({
+    provider: 'openai',
+    model: '',
+    api_key: '',
+    temperature: '0.2',
+    timeout: '30',
+    max_tokens: '1000',
+    max_retries: '2',
+  })
   const [gcp, setGcp] = useState({ client_id: '', client_secret: '', json: '' })
   const [busy, setBusy] = useState(false)
 
@@ -40,6 +54,10 @@ export default function App() {
       ...prev,
       provider: data.llm.provider || prev.provider || 'openai',
       model: data.llm.model || prev.model,
+      temperature: data.llm.temperature || prev.temperature,
+      timeout: data.llm.timeout || prev.timeout,
+      max_tokens: data.llm.max_tokens || prev.max_tokens,
+      max_retries: data.llm.max_retries || prev.max_retries,
     }))
   }, [])
 
@@ -91,7 +109,16 @@ export default function App() {
 
   async function saveLlm() {
     try {
-      await post('/api/setup/llm', llm)
+      const payload = {
+        provider: llm.provider,
+        model: llm.model.trim(),
+        api_key: llm.api_key,
+        temperature: num(llm.temperature, 0.2),
+        timeout: num(llm.timeout, 30),
+        max_tokens: num(llm.max_tokens, 1000),
+        max_retries: num(llm.max_retries, 2),
+      }
+      await post('/api/setup/llm', payload)
       setMessage({ kind: 'ok', text: tr('llm_saved') })
       await loadStatus()
     } catch (e) {
@@ -125,13 +152,16 @@ export default function App() {
 
   if (!status) return <div className="wrap">{tr('loading')}</div>
 
-  const preset = PROVIDERS[llm.provider] || PROVIDERS.custom
+  const preset = PROVIDERS[llm.provider] || PROVIDERS.openai
 
   return (
     <div className="wrap">
-      <header>
+      <header className="app-header">
         <div className="header-row">
-          <h1>Chatbot Gmail</h1>
+          <div>
+            <h1>Chatbot Gmail</h1>
+            <p>{tr('subtitle')}</p>
+          </div>
           <div className="lang-switch">
             <button className={lang === 'vi' ? 'active' : ''} onClick={() => switchLang('vi')}>
               VI
@@ -141,7 +171,6 @@ export default function App() {
             </button>
           </div>
         </div>
-        <p>{tr('subtitle')}</p>
         <div className="chips">
           <Chip
             ok={status.bot.configured}
@@ -178,30 +207,34 @@ export default function App() {
       <section>
         <h2>{tr('step2_title')}</h2>
         <p className="hint">{tr('step2_hint')}</p>
+
+        <div className="provider-grid">
+          {Object.entries(PROVIDERS).map(([key, p]) => (
+            <button
+              type="button"
+              key={key}
+              className={`provider-card ${llm.provider === key ? 'active' : ''}`}
+              onClick={() => changeProvider(key)}
+            >
+              <span className="provider-name">{p.label}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="grid">
-          <Field label={tr('provider')}>
-            <select value={llm.provider} onChange={(e) => changeProvider(e.target.value)}>
-              {Object.entries(PROVIDERS).map(([key, p]) => (
-                <option key={key} value={key}>
-                  {p.label}
+          <Field label={tr('model')}>
+            <select value={llm.model} onChange={(e) => setLlm({ ...llm, model: e.target.value })}>
+              {llm.model && !preset.models.includes(llm.model) && (
+                <option value={llm.model}>{llm.model}</option>
+              )}
+              {preset.models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label={tr('model')}>
-            <input
-              list="model-options"
-              value={llm.model}
-              placeholder={preset.models[0] || 'model-name'}
-              onChange={(e) => setLlm({ ...llm, model: e.target.value })}
-            />
-            <datalist id="model-options">
-              {preset.models.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          </Field>
-          <Field label={tr('api_key')}>
+          <Field label={tr('api_key')} hint={tr('api_key_hint')}>
             <input
               type="password"
               value={llm.api_key}
@@ -210,6 +243,47 @@ export default function App() {
             />
           </Field>
         </div>
+
+        <details className="advanced">
+          <summary>{tr('advanced')}</summary>
+          <div className="grid">
+            <Field label={tr('temperature')} hint={tr('temperature_hint')}>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                value={llm.temperature}
+                onChange={(e) => setLlm({ ...llm, temperature: e.target.value })}
+              />
+            </Field>
+            <Field label={tr('timeout')} hint={tr('timeout_hint')}>
+              <input
+                type="number"
+                min="1"
+                value={llm.timeout}
+                onChange={(e) => setLlm({ ...llm, timeout: e.target.value })}
+              />
+            </Field>
+            <Field label={tr('max_tokens')} hint={tr('max_tokens_hint')}>
+              <input
+                type="number"
+                min="1"
+                value={llm.max_tokens}
+                onChange={(e) => setLlm({ ...llm, max_tokens: e.target.value })}
+              />
+            </Field>
+            <Field label={tr('max_retries')} hint={tr('max_retries_hint')}>
+              <input
+                type="number"
+                min="0"
+                value={llm.max_retries}
+                onChange={(e) => setLlm({ ...llm, max_retries: e.target.value })}
+              />
+            </Field>
+          </div>
+        </details>
+
         <button onClick={saveLlm}>{tr('save_llm')}</button>
       </section>
 

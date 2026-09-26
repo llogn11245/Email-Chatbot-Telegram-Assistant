@@ -23,6 +23,9 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://chatbot:chatbot@db:5432/chatbot
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "8000:8000"
     depends_on:

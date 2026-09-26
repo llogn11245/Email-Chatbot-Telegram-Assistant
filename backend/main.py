@@ -21,17 +21,11 @@ async def _run_web() -> None:
 
 
 async def main() -> None:
-    mode = config.RUN_MODE
     manager = BotManager()
     tasks = []
-    if mode in ("both", "web"):
-        tasks.append(_run_web())
-    if mode in ("both", "bot"):
-        webapp.set_bot_manager(manager)
-        await manager.start()
-    if not tasks:
-        print("Không có gì để chạy (RUN_MODE=bot và chưa cấu hình web).")
-        return
+    tasks.append(_run_web())
+    webapp.set_bot_manager(manager)
+    await manager.start()
     await asyncio.gather(*tasks)
 
 

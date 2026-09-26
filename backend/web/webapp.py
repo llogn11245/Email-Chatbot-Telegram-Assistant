@@ -30,9 +30,12 @@ class LanguageBody(BaseModel):
 
 class LlmSetupBody(BaseModel):
     provider: str = "openai"
-    model: str = "gpt-4o-mini"
-    api_key: str
-    base_url: str | None = None
+    model: str = ""
+    api_key: str = ""
+    temperature: float = 0.2
+    timeout: int = 30
+    max_tokens: int = 1000
+    max_retries: int = 2
 
 
 class GcpSetupBody(BaseModel):
@@ -71,7 +74,10 @@ def create_app() -> FastAPI:
                 "configured": state["llm_configured"],
                 "provider": settings.get("llm_provider"),
                 "model": settings.get("llm_model"),
-                "base_url": settings.get("llm_base_url"),
+                "temperature": settings.get("llm_temperature"),
+                "timeout": settings.get("llm_timeout"),
+                "max_tokens": settings.get("llm_max_tokens"),
+                "max_retries": settings.get("llm_max_retries"),
             },
             "gcp": {"configured": state["gcp_configured"]},
             "gmail": {
@@ -123,9 +129,12 @@ def create_app() -> FastAPI:
     def setup_llm(body: LlmSetupBody):
         storage.update_settings(
             llm_provider=body.provider or "openai",
-            llm_model=body.model or "gpt-4o-mini",
+            llm_model=(body.model or "").strip(),
             llm_api_key=body.api_key.strip(),
-            llm_base_url=(body.base_url or "").strip(),
+            llm_temperature=str(body.temperature),
+            llm_timeout=str(body.timeout),
+            llm_max_tokens=str(body.max_tokens),
+            llm_max_retries=str(body.max_retries),
         )
         return storage.setup_state()
 
