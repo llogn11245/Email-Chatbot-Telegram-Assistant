@@ -6,14 +6,14 @@ Tài liệu này mô tả các "seam" đã chừa sẵn trong code để thêm p
 
 | Thành phần | Vị trí | Vai trò |
 |---|---|---|
-| `Retriever` protocol + `NullRetriever` | `backend/agent/retriever.py` | Trả về `list[Document]`; hiện là no-op. |
-| `get_retriever(settings)` | `backend/agent/retriever.py` | Chọn retriever theo feature flag `rag_enabled`. |
-| `get_embeddings(settings)` | `backend/agent/embeddings.py` | Seam embeddings (chưa hiện thực). |
-| Pipeline state | `backend/agent/pipeline/state.py` | `AgentState` có `context_docs`, `trace_id`. |
-| `build_agent` / `build_context_messages` | `backend/agent/pipeline/builder.py` | Ráp agent + chèn ngữ cảnh retrieval trước câu hỏi user. |
-| Tool registry | `backend/agent/tools.py` (`get_tools`) | Thêm tool mới (vd `search_knowledge_base`) tại đây. |
-| `settings.features` (JSON) | `backend/storage.py` | Cờ bật/tắt + cấu hình RAG. |
-| Observability | `backend/observability/` | Log retrieval/tool để debug. |
+| `Retriever` protocol + `NullRetriever` | `app/agent/retriever.py` | Trả về `list[Document]`; hiện là no-op. |
+| `get_retriever(settings)` | `app/agent/retriever.py` | Chọn retriever theo feature flag `rag_enabled`. |
+| `get_embeddings(settings)` | `app/agent/embeddings.py` | Seam embeddings (chưa hiện thực). |
+| Pipeline state | `app/agent/pipeline/state.py` | `AgentState` có `context_docs`, `trace_id`. |
+| `build_agent` / `build_context_messages` | `app/agent/pipeline/builder.py` | Ráp agent + chèn ngữ cảnh retrieval trước câu hỏi user. |
+| Tool registry | `app/agent/tools.py` (`get_tools`) | Thêm tool mới (vd `search_knowledge_base`) tại đây. |
+| `settings.features` (JSON) | `app/core/storage.py` | Cờ bật/tắt + cấu hình RAG. |
+| Observability | `app/core/observability/` | Log retrieval/tool để debug. |
 
 Bật RAG sẽ chỉ cần: đặt `features.rag_enabled = true`, hiện thực `VectorRetriever`, và (nếu muốn) thêm tool search.
 
@@ -67,7 +67,7 @@ Chưa chốt. Các lựa chọn:
 
 ## Embeddings
 
-Chưa chốt: API-based (nhẹ bundle, cần mạng) hay local (offline, nặng bundle). Hiện thực ở `backend/agent/embeddings.py`.
+Chưa chốt: API-based (nhẹ bundle, cần mạng) hay local (offline, nặng bundle). Hiện thực ở `app/agent/embeddings.py`.
 
 ## Luồng khi RAG bật
 

@@ -1,44 +1,46 @@
 # Chatbot Gmail
 
-Ứng dụng desktop (Windows-first) chạy nền: trợ lý email AI qua **Telegram**. User cài một lần, mở **Settings (native GUI)** để cấu hình bot token, model AI và kết nối Gmail; sau đó chat với bot để tìm/đọc/tóm tắt email và soạn & gửi email (luôn có xác nhận).
+Ứng dụng **desktop** (Windows-first) chạy nền: trợ lý email AI qua **Telegram**. User cài một lần, mở **Settings (native GUI - Tkinter)** để cấu hình bot token, model AI và kết nối Gmail; sau đó chat với bot để tìm/đọc/tóm tắt email và soạn & gửi email (luôn có xác nhận).
 
 - **Chạy nền dạng tray** — không cần Docker, không cần hosting, không cần URL public.
-- **Native GUI (Tkinter/ttk)** — cửa sổ Settings thật, không dùng webview.
+- **Native GUI (Tkinter/ttk)** — không dùng webview, không có front-end web.
 - **Nhiều tài khoản Gmail** với nhãn tùy chỉnh và một tài khoản mặc định.
 - **4 nhà cung cấp model:** OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google) — kèm tham số (temperature, timeout, max_tokens, max_retries).
 - **SQLite** trong thư mục dữ liệu người dùng; secrets mã hoá Fernet.
-- **Log ra file** (30 ngày) + tab **Logs** trong Settings để xem sự cố.
+- **Log ra file** (30 ngày) + tab **Logs** trong Settings.
 - Vi/EN.
 
 ```
-Tray app (resident)
-  ├── asyncio loop: BotManager (long-poll Telegram) + Web server 127.0.0.1 (OAuth callback)
-  ├── Cửa sổ Settings — native GUI (Tkinter/ttk) ← đóng thì thu về tray, click tray mở lại
+Desktop app (resident)
+  ├── Runtime (thread nền): BotManager — long-poll Telegram
+  ├── Settings — native GUI (Tkinter/ttk); đóng → thu về tray, click tray mở lại
+  ├── OAuth loopback server (stdlib) — chỉ chạy khi thêm tài khoản Gmail
   └── SQLite + Fernet trong thư mục dữ liệu người dùng
 ```
 
 ## Cài đặt & chạy (dev)
 
-Yêu cầu: Python 3.12 (Tkinter có sẵn trong bản Python chính thức). Node.js chỉ cần nếu bạn muốn dùng **UI web cho chế độ headless**.
+Yêu cầu: Python 3.12 (Tkinter có sẵn trong bản Python chính thức). Không cần Node.js.
+
+- Windows/macOS: Tkinter có sẵn.
+- Linux/WSL: cần `sudo apt install python3-tk` và một display (Windows 11 có WSLg).
 
 ```bash
 python -m venv venv
 venv/bin/pip install -r requirements.txt     # Windows: venv\Scripts\pip
-# chạy app desktop (native GUI + tray)
-python -m backend
+python -m app                                # chạy app desktop (native GUI + tray)
 ```
 
 App mở cửa sổ Settings; đóng cửa sổ thì chạy nền ở khay hệ thống. Nhấn icon khay để mở lại, bật/tắt "Khởi động cùng máy", hoặc thoát.
 
-> Nếu môi trường không có GUI/display (vd dev trong WSL), app tự chuyển sang chế độ headless: chạy web server và mở trình duyệt (UI web React). Chế độ này cần build `frontend/dist`:
-> `cd frontend && npm install && npm run build`.
+> Nếu môi trường không có display (vd dev trong WSL/Linux headless), app tự chuyển sang chế độ nền chỉ chạy bot (in hướng dẫn ra console).
 
 ## Cấu hình (trong Settings)
 
-1. **Bot Telegram** — tạo bot với @BotFather, dán token. Bot tự khởi động lại khi lưu.
-2. **Model AI** — chọn provider (OpenAI / DeepSeek / Claude / Gemini), model, API key; mở "Tham số nâng cao" để chỉnh temperature/timeout/max_tokens/max_retries.
-3. **Google OAuth client** — dán nội dung `client_secret.json`.
-4. **Tài khoản Gmail** — bấm **Add account** (mở trình duyệt để đăng nhập Google), thêm nhiều tài khoản, đặt nhãn và tài khoản mặc định.
+1. **Telegram** — tạo bot với @BotFather, dán token, bấm Lưu & khởi động. Bật "Khởi động cùng máy" nếu muốn.
+2. **AI model** — chọn provider (OpenAI / DeepSeek / Claude / Gemini), model, API key; chỉnh temperature/timeout/max_tokens/max_retries.
+3. **Google / Gmail** — dán nội dung `client_secret.json` (hoặc Client ID/Secret). Bấm **Add account** để mở trình duyệt đăng nhập Google; thêm nhiều tài khoản, đặt nhãn và tài khoản mặc định.
+4. **Logs** — xem log gần đây, lọc theo mức.
 
 ## Google OAuth client (làm 1 lần)
 
@@ -48,9 +50,9 @@ App mở cửa sổ Settings; đóng cửa sổ thì chạy nền ở khay hệ 
    - **Quan trọng:** bấm **Publish app** (In production). Nếu để *Testing*, refresh token hết hạn sau 7 ngày.
    - Cảnh báo "chưa verified" là bình thường với scope Gmail.
 4. **Credentials → Create Credentials → OAuth client ID** → type **Desktop app** → tải JSON.
-5. Dán JSON vào bước 3 của Settings.
+5. Dán JSON vào tab "Google / Gmail" của Settings.
 
-Scope dùng: `gmail.readonly` + `gmail.send`.
+Scope dùng: `gmail.readonly` + `gmail.send`. Redirect dùng loopback `http://localhost:<port>/` (port ngẫu nhiên do app tự mở khi thêm tài khoản — Desktop client cho phép mọi port loopback).
 
 ## Hành vi nhiều tài khoản
 
@@ -72,20 +74,14 @@ Scope dùng: `gmail.readonly` + `gmail.send`.
 
 ## Build bản Windows (.exe)
 
-Cần: Python 3.12. Node.js **không bắt buộc** (repo đã kèm sẵn `frontend/dist`).
-
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 # -> dist\ChatbotGmail\ChatbotGmail.exe   (onedir)
-
-# tuỳ chọn
-#   -SkipFrontend   : không build lại UI
-#   -SkipInstaller  : không tạo installer
 ```
 
-Script sẽ: cài deps Python + PyInstaller → (build frontend nếu cần) → chạy PyInstaller → (tạo installer nếu có Inno Setup 6).
+Script sẽ: cài deps Python + PyInstaller → chạy PyInstaller → (tạo installer nếu có Inno Setup 6).
 
-Nếu muốn chạy PyInstaller trực tiếp (đảm bảo `frontend/dist` đã có):
+Chạy PyInstaller trực tiếp:
 
 ```powershell
 python -m pip install -r requirements.txt pyinstaller
@@ -93,36 +89,44 @@ python -m PyInstaller --noconfirm --clean packaging\pyinstaller\chatbot-gmail.sp
 ```
 
 Lưu ý:
+- Dùng **venv riêng**; đảm bảo `pip` và `PyInstaller` dùng **cùng một Python** (không dùng conda base). Spec sẽ **báo lỗi rõ** nếu thiếu package.
 - PyInstaller **không cross-compile** — build Windows trên Windows, macOS/Linux cần build riêng.
-- `frontend/dist` được commit sẵn trong repo. Nếu bạn sửa UI, chạy `cd frontend && npm install && npm run build` rồi commit lại `frontend/dist`.
-- Build ở đường dẫn ổ đĩa Windows bình thường (tránh thư mục UNC kiểu `\\wsl.localhost\...`).
+- Build ở đường dẫn ổ đĩa bình thường (tránh thư mục UNC kiểu `\\wsl.localhost\...`).
 
 ## Cấu trúc thư mục
 
 ```
-backend/
-  config.py             # env + paths (SQLite, SECRET_KEY, resource path)
-  paths.py              # platformdirs, secret key, resource path khi đóng gói
-  storage.py            # SQLAlchemy (SQLite) + Fernet, migration
-  i18n.py               # chuỗi vi/en cho bot
-  main.py               # entry dev headless (web + bot)
-  __main__.py           # entry desktop: python -m backend
-  observability/        # logging file, AppError, event_ref, context
-  desktop/              # tray, native GUI (Tkinter/ttk), autostart, service runner
-  email_services/       # gmail_client (nhiều tài khoản)
-  web/                  # FastAPI: setup API, OAuth callback, /api/logs
-  bot/                  # aiogram handlers + manager
+app/
+  __main__.py            # entry: python -m app
+  core/                  # nền tảng dùng chung
+    config.py            # env + paths
+    paths.py             # platformdirs, secret key, resource path
+    storage.py           # SQLAlchemy (SQLite) + Fernet, migration
+    i18n.py              # chuỗi vi/en cho bot
+    observability/       # logging file, AppError, event_ref, context
+  auth/
+    oauth.py             # Google OAuth: consent URL, loopback callback server
+  email/
+    gmail_client.py      # Gmail API: search/read/send/profile (nhiều tài khoản)
   agent/
-    llm.py              # init_chat_model (4 provider) — lazy import
-    tools.py            # registry tools Gmail
-    graph.py            # run_agent (lazy import langchain/langgraph)
-    pipeline/           # state + builder (seam RAG)
-    retriever.py        # Retriever protocol + NullRetriever
-    embeddings.py       # seam embeddings
-frontend/               # React (Vite) — UI web chỉ cho chế độ headless (tuỳ chọn)
-packaging/              # PyInstaller spec + Inno Setup + entry
-assets/                 # icon
-docs/RAG_DESIGN.md      # thiết kế mở rộng RAG
+    llm.py               # init_chat_model (4 provider) — lazy import
+    tools.py             # registry tools Gmail
+    graph.py             # run_agent (lazy import langchain/langgraph)
+    retriever.py         # Retriever protocol + NullRetriever (seam RAG)
+    embeddings.py        # seam embeddings
+    pipeline/            # state + builder
+  telegram/
+    manager.py           # start/stop/restart bot
+    handlers.py          # /start /setup /status /accounts /language, chat, xác nhận gửi
+  desktop/               # native GUI + tray + lifecycle
+    app.py               # DesktopApp: single-instance, tray, GUI main loop
+    gui.py               # Settings (Tkinter/ttk), 4 tab
+    runtime.py           # runtime bot (asyncio loop trong thread nền)
+    tray.py              # pystray
+    autostart.py         # Windows/macOS/Linux
+packaging/               # PyInstaller spec + Inno Setup + entry
+assets/                  # icon
+docs/RAG_DESIGN.md       # thiết kế mở rộng RAG
 ```
 
 ## Hạn chế đã biết

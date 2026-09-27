@@ -7,15 +7,6 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 
-_INDEX = os.path.join(ROOT, "frontend", "dist", "index.html")
-if not os.path.isfile(_INDEX):
-    raise SystemExit(
-        "Khong tim thay frontend/dist/index.html.\n"
-        "Hay build UI truoc khi dong goi:\n"
-        "  cd frontend && npm install && npm run build\n"
-        "hoac chay: powershell -ExecutionPolicy Bypass -File packaging\\build_windows.ps1"
-    )
-
 
 def _has_module(name):
     try:
@@ -27,8 +18,6 @@ def _has_module(name):
 # Các package BẮT BUỘC phải được cài trong đúng interpreter đang chạy PyInstaller.
 _required = [
     "aiogram",
-    "uvicorn",
-    "fastapi",
     "sqlalchemy",
     "pydantic",
     "langchain",
@@ -88,7 +77,6 @@ packages = [
     "sqlalchemy",
     "aiogram",
     "aiohttp",
-    "uvicorn",
     "pystray",
     "PIL",
     "tkinter",
@@ -99,18 +87,12 @@ for pkg in packages:
     hiddenimports += safe_submodules(pkg)
 
 hiddenimports += [
-    "backend",
-    "backend.desktop.app",
+    "app",
+    "app.desktop.app",
     "sqlalchemy.dialects.sqlite",
-    "uvicorn.logging",
-    "uvicorn.loops.auto",
-    "uvicorn.protocols.http.auto",
-    "uvicorn.protocols.websockets.auto",
-    "uvicorn.lifespan.on",
 ]
 
 datas = [
-    (os.path.join(ROOT, "frontend", "dist"), "frontend/dist"),
     (os.path.join(ROOT, "assets", "icon.ico"), "assets"),
 ]
 for meta in ("tiktoken", "langchain", "langchain-core", "langchain-openai", "langgraph", "openai"):
