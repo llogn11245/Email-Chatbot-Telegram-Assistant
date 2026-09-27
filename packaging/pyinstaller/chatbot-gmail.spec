@@ -5,6 +5,15 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 
+_INDEX = os.path.join(ROOT, "frontend", "dist", "index.html")
+if not os.path.isfile(_INDEX):
+    raise SystemExit(
+        "Khong tim thay frontend/dist/index.html.\n"
+        "Hay build UI truoc khi dong goi:\n"
+        "  cd frontend && npm install && npm run build\n"
+        "hoac chay: powershell -ExecutionPolicy Bypass -File packaging\\build_windows.ps1"
+    )
+
 
 def safe_submodules(name):
     try:

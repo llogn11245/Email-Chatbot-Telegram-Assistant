@@ -72,16 +72,30 @@ Scope dùng: `gmail.readonly` + `gmail.send`.
 
 ## Build bản Windows (.exe)
 
+Cần: Python 3.12. Node.js **không bắt buộc** (repo đã kèm sẵn `frontend/dist`).
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-# -> dist\ChatbotGmail\ChatbotGmail.exe  (onedir)
+# -> dist\ChatbotGmail\ChatbotGmail.exe   (onedir)
 
-# (Tuỳ chọn) tạo installer, cần Inno Setup (iscc):
-iscc packaging\windows\installer.iss
-# -> dist\installer\ChatbotGmail-Setup.exe
+# tuỳ chọn
+#   -SkipFrontend   : không build lại UI
+#   -SkipInstaller  : không tạo installer
 ```
 
-Lưu ý: PyInstaller **không cross-compile** — build Windows trên Windows, macOS/Linux cần build riêng.
+Script sẽ: cài deps Python + PyInstaller → (build frontend nếu cần) → chạy PyInstaller → (tạo installer nếu có Inno Setup 6).
+
+Nếu muốn chạy PyInstaller trực tiếp (đảm bảo `frontend/dist` đã có):
+
+```powershell
+python -m pip install -r requirements.txt pyinstaller
+python -m PyInstaller --noconfirm --clean packaging\pyinstaller\chatbot-gmail.spec
+```
+
+Lưu ý:
+- PyInstaller **không cross-compile** — build Windows trên Windows, macOS/Linux cần build riêng.
+- `frontend/dist` được commit sẵn trong repo. Nếu bạn sửa UI, chạy `cd frontend && npm install && npm run build` rồi commit lại `frontend/dist`.
+- Build ở đường dẫn ổ đĩa Windows bình thường (tránh thư mục UNC kiểu `\\wsl.localhost\...`).
 
 ## Cấu trúc thư mục
 

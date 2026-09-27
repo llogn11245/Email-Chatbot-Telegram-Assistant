@@ -16,7 +16,6 @@ data/
 
 # Frontend
 node_modules/
-frontend/dist/
 
 # Build outputs
 /build/
