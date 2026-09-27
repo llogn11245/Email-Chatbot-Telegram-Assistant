@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
+import importlib.util
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
@@ -12,6 +14,44 @@ if not os.path.isfile(_INDEX):
         "Hay build UI truoc khi dong goi:\n"
         "  cd frontend && npm install && npm run build\n"
         "hoac chay: powershell -ExecutionPolicy Bypass -File packaging\\build_windows.ps1"
+    )
+
+
+def _has_module(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+# Các package BẮT BUỘC phải được cài trong đúng interpreter đang chạy PyInstaller.
+_required = [
+    "aiogram",
+    "uvicorn",
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+    "langchain",
+    "langchain_core",
+    "langgraph",
+    "langchain_openai",
+    "langchain_anthropic",
+    "langchain_google_genai",
+    "langchain_deepseek",
+    "googleapiclient",
+    "google_auth_oauthlib",
+]
+if sys.platform.startswith("win"):
+    _required += ["pystray", "PIL"]
+
+_missing = [name for name in _required if not _has_module(name)]
+if _missing:
+    raise SystemExit(
+        "Thieu package trong moi truong build: "
+        + ", ".join(_missing)
+        + "\nHay cai dung interpreter nay:\n"
+        + "  python -m pip install -r requirements.txt\n"
+        + "(Dam bao pip va PyInstaller dung CUNG mot Python; khuyen nghi dung venv rieng)"
     )
 
 
@@ -49,10 +89,9 @@ packages = [
     "aiogram",
     "aiohttp",
     "uvicorn",
-    "webview",
     "pystray",
     "PIL",
-    "clr",
+    "tkinter",
 ]
 
 hiddenimports = []
@@ -85,7 +124,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[os.path.join(ROOT, "packaging", "pyinstaller", "runtime_hook.py")],
-    excludes=["tkinter", "matplotlib", "numpy", "pandas"],
+    excludes=["matplotlib", "numpy", "pandas"],
     noarchive=False,
 )
 

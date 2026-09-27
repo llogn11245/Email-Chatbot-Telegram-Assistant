@@ -95,5 +95,4 @@ TOOLS = [list_gmail_accounts, search_emails, read_email, request_send_email]
 
 
 def get_tools(settings=None):
-    """Registry tools. Thêm tool mới (vd search_knowledge_base) ở đây khi làm RAG."""
     return list(TOOLS)

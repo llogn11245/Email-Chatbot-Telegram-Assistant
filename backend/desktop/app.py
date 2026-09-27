@@ -1,3 +1,4 @@
+import queue
 import sys
 import threading
 import time
@@ -53,27 +54,37 @@ class SingleInstance:
 class DesktopApp:
     def __init__(self) -> None:
         self.services = ServiceRunner()
+        self._root = None
         self._tray = None
-        self._window = None
-        self._window_thread = None
+        self._tray_available = False
+        self._queue: queue.Queue = queue.Queue()
         self._quitting = False
 
+    # -- thread-safe commands ---------------------------------------------
+    def post(self, func) -> None:
+        self._queue.put(func)
+
+    def _pump(self) -> None:
+        try:
+            while True:
+                self._queue.get_nowait()()
+        except queue.Empty:
+            pass
+        if self._root is not None and not self._quitting:
+            self._root.after(100, self._pump)
+
+    # -- tray callbacks ----------------------------------------------------
     def open_settings(self) -> None:
-        self.services.start(wait=False)
-        self.services.wait_until_ready(timeout=15)
-        if self._window is not None:
-            self._window.show()
-            return
-        self._start_window()
+        if self._root is not None:
+            self.post(self._show_window)
 
-    def _start_window(self) -> None:
-        from backend.desktop.window import SettingsWindow
-
-        self._window = SettingsWindow(self.services.url)
-        self._window_thread = threading.Thread(
-            target=self._window.start, name="settings-window", daemon=True
-        )
-        self._window_thread.start()
+    def _show_window(self) -> None:
+        try:
+            self._root.deiconify()
+            self._root.lift()
+            self._root.focus_force()
+        except Exception:
+            pass
 
     def autostart_enabled(self) -> bool:
         from backend.desktop import autostart
@@ -86,68 +97,89 @@ class DesktopApp:
         autostart.set_enabled(not autostart.is_enabled())
 
     def quit(self) -> None:
-        if self._quitting:
-            return
+        if self._root is not None:
+            self.post(self._do_quit)
+        else:
+            self._do_quit()
+
+    def _do_quit(self) -> None:
         self._quitting = True
+        try:
+            if self._root is not None:
+                self._root.destroy()
+        except Exception:
+            pass
+
+    # -- lifecycle ---------------------------------------------------------
+    def _on_window_close(self) -> None:
+        if self._tray_available:
+            self._root.withdraw()
+        else:
+            self._do_quit()
+
+    def _start_tray(self) -> None:
+        try:
+            from backend.desktop.tray import build_tray
+
+            self._tray = build_tray(self)
+            threading.Thread(target=self._tray.run, name="tray", daemon=True).start()
+            self._tray_available = True
+            record_event("INFO", "desktop", "tray started")
+        except Exception as exc:
+            record_event("WARNING", "desktop", f"tray unavailable: {exc}", exc=exc)
+
+    def _run_gui(self) -> None:
+        import tkinter as tk
+
+        from backend.desktop.gui import SettingsApp
+
+        root = tk.Tk()
+        self._root = root
+        root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        SettingsApp(self, root, self.services)
+        root.after(100, self._pump)
+        root.mainloop()
+
+    def _run_headless(self) -> None:
+        import webbrowser
+
+        webbrowser.open(self.services.url)
+        record_event("INFO", "desktop", "headless mode (no GUI). Ctrl+C to quit.")
+        try:
+            while not self._quitting:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+    def _shutdown(self) -> None:
         record_event("INFO", "desktop", "shutting down")
         try:
             if self._tray is not None:
                 self._tray.stop()
         except Exception:
             pass
-        try:
-            if self._window is not None and self._window.window is not None:
-                import webview
-
-                webview.destroy_window(self._window.window)
-        except Exception:
-            pass
         self.services.stop()
-
-    def _run_headless(self) -> None:
-        import webbrowser
-
-        self.services.start()
-        self.services.wait_until_ready(timeout=30)
-        webbrowser.open(self.services.url)
-        record_event("INFO", "desktop", "headless mode (no tray). Ctrl+C to quit.")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.quit()
 
     def run(self) -> None:
         instance = SingleInstance()
         if not instance.acquire():
-            record_event("WARNING", "desktop", "another instance is already running")
             print("Chatbot Gmail đang chạy rồi.")
             return
 
         setup_logging()
         record_event("INFO", "desktop", f"start (data={config.DATA_DIR})")
 
-        try:
-            from backend.desktop.tray import build_tray
-        except Exception as exc:
-            record_event("ERROR", "desktop", f"tray unavailable: {exc}", exc=exc)
-            self._run_headless()
-            instance.release()
-            return
-
         self.services.start()
         self.services.wait_until_ready(timeout=30)
-        self._start_window()
+        self._start_tray()
+
         try:
-            self._tray = build_tray(self)
-            self._tray.run()
+            self._run_gui()
         except Exception as exc:
-            record_event("ERROR", "desktop", f"tray failed: {exc}", exc=exc)
+            record_event("ERROR", "desktop", f"GUI failed: {exc}", exc=exc)
             self._run_headless()
         finally:
-            self.quit()
+            self._shutdown()
             instance.release()
 
 

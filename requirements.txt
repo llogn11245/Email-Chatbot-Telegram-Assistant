@@ -92,4 +92,3 @@ zstandard==0.25.0
 # Desktop GUI (Windows-first; macOS/Linux cần backend tương ứng)
 pystray>=0.19.5
 Pillow>=10.4.0
-pywebview>=5.0

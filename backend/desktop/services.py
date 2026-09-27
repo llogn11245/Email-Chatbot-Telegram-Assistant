@@ -1,11 +1,12 @@
 import asyncio
+import concurrent.futures
 import socket
 import threading
 import time
 
 import uvicorn
 
-from backend import config
+from backend import config, storage
 from backend.bot.manager import BotManager
 from backend.observability import record_event
 from backend.web import webapp
@@ -21,7 +22,7 @@ def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 
 
 class ServiceRunner:
-    """Chạy web server + Telegram bot trong một event loop ở thread nền."""
+    """Chạy web server (cho OAuth callback) + Telegram bot trong một event loop ở thread nền."""
 
     def __init__(self, port: int | None = None) -> None:
         self.port = port or config.WEB_PORT
@@ -88,3 +89,49 @@ class ServiceRunner:
         if self._thread is not None:
             self._thread.join(timeout=10)
             self._thread = None
+
+    # -- API cho GUI -------------------------------------------------------
+    def submit(self, coro, timeout: float | None = 30.0):
+        if self._loop is None:
+            raise RuntimeError("services chưa chạy")
+        future: concurrent.futures.Future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout) if timeout else future
+
+    def is_bot_running(self) -> bool:
+        try:
+            return bool(self._manager and self._manager.running)
+        except Exception:
+            return False
+
+    def set_bot_token(self, token: str) -> dict:
+        return self.submit(self._set_bot_token(token), timeout=30)
+
+    async def _set_bot_token(self, token: str) -> dict:
+        from aiogram import Bot
+        from aiogram.exceptions import TelegramUnauthorizedError
+
+        token = (token or "").strip()
+        if not token:
+            raise ValueError("Bot token trống.")
+
+        username = ""
+        warning = None
+        bot = Bot(token=token)
+        try:
+            me = await bot.get_me()
+            username = me.username or ""
+        except TelegramUnauthorizedError as exc:
+            raise ValueError("Bot token không hợp lệ.") from exc
+        except Exception as exc:
+            warning = f"Không kiểm tra được token qua mạng: {exc}"
+        finally:
+            await bot.session.close()
+
+        storage.update_settings(bot_token=token, bot_username=username)
+        running = False
+        if self._manager is not None:
+            try:
+                running = await self._manager.restart()
+            except Exception as exc:
+                warning = f"Không khởi động được bot: {exc}"
+        return {"username": username, "running": running, "warning": warning}

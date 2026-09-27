@@ -1,8 +1,9 @@
 # Chatbot Gmail
 
-Ứng dụng desktop (Windows-first) chạy nền: trợ lý email AI qua **Telegram**. User cài một lần, mở **Settings** để cấu hình bot token, model AI và kết nối Gmail; sau đó chat với bot để tìm/đọc/tóm tắt email và soạn & gửi email (luôn có xác nhận).
+Ứng dụng desktop (Windows-first) chạy nền: trợ lý email AI qua **Telegram**. User cài một lần, mở **Settings (native GUI)** để cấu hình bot token, model AI và kết nối Gmail; sau đó chat với bot để tìm/đọc/tóm tắt email và soạn & gửi email (luôn có xác nhận).
 
 - **Chạy nền dạng tray** — không cần Docker, không cần hosting, không cần URL public.
+- **Native GUI (Tkinter/ttk)** — cửa sổ Settings thật, không dùng webview.
 - **Nhiều tài khoản Gmail** với nhãn tùy chỉnh và một tài khoản mặc định.
 - **4 nhà cung cấp model:** OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google) — kèm tham số (temperature, timeout, max_tokens, max_retries).
 - **SQLite** trong thư mục dữ liệu người dùng; secrets mã hoá Fernet.
@@ -11,27 +12,26 @@
 
 ```
 Tray app (resident)
-  ├── asyncio loop: BotManager (long-poll Telegram) + Web server 127.0.0.1
-  ├── Cửa sổ Settings (pywebview) ← đóng thì thu về tray, click tray mở lại
+  ├── asyncio loop: BotManager (long-poll Telegram) + Web server 127.0.0.1 (OAuth callback)
+  ├── Cửa sổ Settings — native GUI (Tkinter/ttk) ← đóng thì thu về tray, click tray mở lại
   └── SQLite + Fernet trong thư mục dữ liệu người dùng
 ```
 
 ## Cài đặt & chạy (dev)
 
-Yêu cầu: Python 3.12, Node.js (để build frontend).
+Yêu cầu: Python 3.12 (Tkinter có sẵn trong bản Python chính thức). Node.js chỉ cần nếu bạn muốn dùng **UI web cho chế độ headless**.
 
 ```bash
 python -m venv venv
 venv/bin/pip install -r requirements.txt     # Windows: venv\Scripts\pip
-# build frontend (một lần / sau khi sửa frontend)
-cd frontend && npm install && npm run build && cd ..
-# chạy app desktop
+# chạy app desktop (native GUI + tray)
 python -m backend
 ```
 
 App mở cửa sổ Settings; đóng cửa sổ thì chạy nền ở khay hệ thống. Nhấn icon khay để mở lại, bật/tắt "Khởi động cùng máy", hoặc thoát.
 
-> Nếu môi trường không có GUI (vd dev trong WSL), app tự chuyển sang chế độ headless: chạy web server và mở trình duyệt.
+> Nếu môi trường không có GUI/display (vd dev trong WSL), app tự chuyển sang chế độ headless: chạy web server và mở trình duyệt (UI web React). Chế độ này cần build `frontend/dist`:
+> `cd frontend && npm install && npm run build`.
 
 ## Cấu hình (trong Settings)
 
@@ -108,7 +108,7 @@ backend/
   main.py               # entry dev headless (web + bot)
   __main__.py           # entry desktop: python -m backend
   observability/        # logging file, AppError, event_ref, context
-  desktop/              # tray, cửa sổ Settings, autostart, service runner
+  desktop/              # tray, native GUI (Tkinter/ttk), autostart, service runner
   email_services/       # gmail_client (nhiều tài khoản)
   web/                  # FastAPI: setup API, OAuth callback, /api/logs
   bot/                  # aiogram handlers + manager
@@ -119,7 +119,7 @@ backend/
     pipeline/           # state + builder (seam RAG)
     retriever.py        # Retriever protocol + NullRetriever
     embeddings.py       # seam embeddings
-frontend/               # React (Vite) Settings + Logs
+frontend/               # React (Vite) — UI web chỉ cho chế độ headless (tuỳ chọn)
 packaging/              # PyInstaller spec + Inno Setup + entry
 assets/                 # icon
 docs/RAG_DESIGN.md      # thiết kế mở rộng RAG
@@ -128,5 +128,5 @@ docs/RAG_DESIGN.md      # thiết kế mở rộng RAG
 ## Hạn chế đã biết
 
 - Bot chỉ online khi app đang chạy (máy bật). Tin nhắn trong ~24h sẽ được xử lý khi app bật lại.
-- Windows-first; macOS/Linux cần backend GUI tương ứng (pywebview/pystray) và build riêng.
+- Windows-first; macOS/Linux cần `pystray` backend tương ứng (Tkinter có sẵn trong Python).
 - RAG chưa hiện thực — đã chừa seam (xem `docs/RAG_DESIGN.md`).
