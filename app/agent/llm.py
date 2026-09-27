@@ -2,6 +2,21 @@ from app.core import storage
 
 PROVIDER_KEYS = {"openai", "deepseek", "anthropic", "google_genai"}
 
+# Client HTTP dùng chung, chỉ nhận gzip/deflate để tránh lỗi giải mã brotli của httpx2.
+_http_client = None
+
+
+def _get_http_client():
+    global _http_client
+    if _http_client is None:
+        try:
+            import httpx2
+
+            _http_client = httpx2.Client(headers={"Accept-Encoding": "gzip, deflate"})
+        except Exception:
+            _http_client = False
+    return _http_client or None
+
 
 def _to_float(value, default: float) -> float:
     try:
@@ -38,5 +53,11 @@ def build_model():
         "max_tokens": _to_int(settings.get("llm_max_tokens"), 1000),
         "max_retries": _to_int(settings.get("llm_max_retries"), 2),
     }
+
+    # OpenAI/DeepSeek đi qua openai SDK (httpx2); tránh brotli để không dính lỗi decode.
+    if provider in ("openai", "deepseek"):
+        client = _get_http_client()
+        if client is not None:
+            kwargs["http_client"] = client
 
     return init_chat_model(model=model, model_provider=provider, **kwargs)

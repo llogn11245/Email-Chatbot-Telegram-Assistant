@@ -134,3 +134,12 @@ docs/RAG_DESIGN.md       # thiết kế mở rộng RAG
 - Bot chỉ online khi app đang chạy (máy bật). Tin nhắn trong ~24h sẽ được xử lý khi app bật lại.
 - Windows-first; macOS/Linux cần `pystray` backend tương ứng (Tkinter có sẵn trong Python).
 - RAG chưa hiện thực — đã chừa seam (xem `docs/RAG_DESIGN.md`).
+
+## Khắc phục sự cố
+
+- **Chat bot báo `OpenAIConnectionError: Connection error` (kèm `TypeError: process() takes no keyword arguments` trong `httpx2/_decoders.py`):** đây là lỗi giải mã **brotli** của `httpx2` (thư viện HTTP mà `openai` dùng) khi server trả `Content-Encoding: br`. Bản mới đã tự gửi `Accept-Encoding: gzip, deflate` nên không còn gặp. Nếu vẫn gặp, gỡ brotli trong đúng môi trường chạy:
+  ```bash
+  pip uninstall -y brotli brotlicffi
+  ```
+  Nguyên nhân thường gặp: chạy bằng **conda base** (có sẵn `brotli`). Khuyến nghị dùng **venv riêng**.
+- **`ModuleNotFoundError: No module named 'tkinter'` (Linux/WSL):** cài `sudo apt install python3-tk` (Windows/macOS có sẵn).

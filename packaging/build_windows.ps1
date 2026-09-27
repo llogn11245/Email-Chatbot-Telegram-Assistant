@@ -22,6 +22,10 @@ Write-Host "==> Cai dependencies"
 & $python -m pip install -r requirements.txt
 & $python -m pip install pyinstaller
 
+# brotli co the do conda base/OS cai san va gay loi decode 'br' trong httpx2 (openai).
+Write-Host "==> Go bo brotli/brotlicffi (neu co)"
+& $python -m pip uninstall -y brotli brotlicffi | Out-Null
+
 Write-Host "==> PyInstaller"
 & $python -m PyInstaller --noconfirm --clean packaging\pyinstaller\chatbot-gmail.spec
 
