@@ -81,7 +81,6 @@ def finalize_oauth(code: str | None, error: str | None) -> HTMLResponse:
         return oauth_done_page(i18n.t("oauth_fail_title", lang), i18n.t("oauth_missing_code", lang))
     try:
         refresh_token = exchange_code(code, client_id, client_secret, config.REDIRECT_URI)
-        storage.update_settings(gmail_refresh_token=refresh_token)
     except HTTPException:
         raise
     except Exception as exc:
@@ -89,9 +88,13 @@ def finalize_oauth(code: str | None, error: str | None) -> HTMLResponse:
             i18n.t("oauth_fail_title", lang), f"{i18n.t('oauth_exchange_error', lang)} {exc}"
         )
     try:
-        email = gmail_client.get_profile_email()
-        storage.update_settings(gmail_email=email)
-    except Exception:
-        email = ""
-    text = f"{i18n.t('oauth_connected', lang)} {email}." if email else f"{i18n.t('oauth_connected', lang)}."
+        email = gmail_client.fetch_profile_email(refresh_token)
+    except Exception as exc:
+        return oauth_done_page(
+            i18n.t("oauth_fail_title", lang),
+            f"{i18n.t('oauth_profile_error', lang)} {exc}",
+        )
+    storage.add_gmail_account(email, refresh_token)
+    gmail_client.clear_cache()
+    text = f"{i18n.t('oauth_connected', lang)} {email}."
     return oauth_done_page(i18n.t("oauth_ok_title", lang), f"{text} {i18n.t('oauth_close', lang)}")

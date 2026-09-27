@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PROVIDERS, translations } from './i18n.js'
 
 function Chip({ ok, label }) {
@@ -19,9 +19,87 @@ function Field({ label, hint, children }) {
   )
 }
 
+function AccountRow({ account, tr, onSetDefault, onRemove, onRename }) {
+  const [label, setLabel] = useState(account.label || '')
+  useEffect(() => setLabel(account.label || ''), [account.label])
+  return (
+    <div className="account-row">
+      <div className="account-main">
+        <input
+          className="account-label"
+          value={label}
+          placeholder={tr('label_placeholder')}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={() => {
+            if (label.trim() !== (account.label || '')) onRename(account.id, label.trim())
+          }}
+        />
+        <span className="account-email">{account.email}</span>
+      </div>
+      <div className="account-actions">
+        {account.is_default ? (
+          <span className="badge-default">{tr('account_default')}</span>
+        ) : (
+          <button type="button" className="ghost" onClick={() => onSetDefault(account.id)}>
+            {tr('set_default')}
+          </button>
+        )}
+        <button type="button" className="ghost danger" onClick={() => onRemove(account.id)}>
+          {tr('remove')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function num(value, fallback) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+function LogsPanel({ tr }) {
+  const [lines, setLines] = useState(null)
+  const [level, setLevel] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ limit: '300' })
+      if (level) params.set('level', level)
+      const res = await fetch('/api/logs?' + params.toString())
+      const data = await res.json()
+      setLines(data.lines || [])
+    } catch (e) {
+      setLines([String(e)])
+    } finally {
+      setLoading(false)
+    }
+  }, [level])
+
+  return (
+    <section>
+      <h2>{tr('logs_title')}</h2>
+      <p className="hint">{tr('logs_hint')}</p>
+      <div className="logs-controls">
+        <select value={level} onChange={(e) => setLevel(e.target.value)}>
+          <option value="">{tr('logs_all')}</option>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+        </select>
+        <button type="button" onClick={load} disabled={loading}>
+          {loading ? '...' : tr('logs_refresh')}
+        </button>
+      </div>
+      {lines &&
+        (lines.length ? (
+          <pre className="logs">{lines.join('\n')}</pre>
+        ) : (
+          <p className="hint">{tr('logs_empty')}</p>
+        ))}
+    </section>
+  )
 }
 
 export default function App() {
@@ -40,6 +118,8 @@ export default function App() {
   })
   const [gcp, setGcp] = useState({ client_id: '', client_secret: '', json: '' })
   const [busy, setBusy] = useState(false)
+  const [awaitingAccount, setAwaitingAccount] = useState(false)
+  const accountCountRef = useRef(0)
 
   const tr = useCallback((key) => translations[lang][key] || key, [lang])
 
@@ -65,17 +145,40 @@ export default function App() {
     loadStatus().catch((e) => setMessage({ kind: 'error', text: String(e) }))
   }, [loadStatus])
 
-  async function post(path, body) {
+  useEffect(() => {
+    if (!awaitingAccount) return undefined
+    let tries = 0
+    const id = setInterval(async () => {
+      tries += 1
+      try {
+        const res = await fetch('/api/status')
+        const data = await res.json()
+        setStatus(data)
+        if ((data.gmail.accounts || []).length > accountCountRef.current) {
+          setAwaitingAccount(false)
+          setMessage({ kind: 'ok', text: tr('account_added') })
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      if (tries >= 60) setAwaitingAccount(false)
+    }, 3000)
+    return () => clearInterval(id)
+  }, [awaitingAccount, tr])
+
+  async function request(path, method, body) {
     setMessage(null)
     const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.detail || res.statusText)
     return data
   }
+  const post = (path, body) => request(path, 'POST', body)
+  const del = (path) => request(path, 'DELETE')
 
   function switchLang(next) {
     setLang(next)
@@ -139,20 +242,52 @@ export default function App() {
     }
   }
 
-  async function connectGmail() {
+  async function addAccount() {
     setBusy(true)
     try {
-      const { url } = await post('/api/oauth/start', {})
-      window.location.href = url
+      accountCountRef.current = (status?.gmail?.accounts || []).length
+      await post('/api/oauth/open', {})
+      setAwaitingAccount(true)
+      setMessage({ kind: 'ok', text: tr('oauth_opened') })
     } catch (e) {
       setMessage({ kind: 'error', text: String(e.message || e) })
+    } finally {
       setBusy(false)
+    }
+  }
+
+  async function setDefaultAccount(id) {
+    try {
+      await post(`/api/gmail/accounts/${id}/default`, {})
+      await loadStatus()
+    } catch (e) {
+      setMessage({ kind: 'error', text: String(e.message || e) })
+    }
+  }
+
+  async function renameAccount(id, label) {
+    try {
+      await post(`/api/gmail/accounts/${id}/label`, { label })
+      await loadStatus()
+    } catch (e) {
+      setMessage({ kind: 'error', text: String(e.message || e) })
+    }
+  }
+
+  async function removeAccount(id) {
+    if (!window.confirm(tr('confirm_remove'))) return
+    try {
+      await del(`/api/gmail/accounts/${id}`)
+      await loadStatus()
+    } catch (e) {
+      setMessage({ kind: 'error', text: String(e.message || e) })
     }
   }
 
   if (!status) return <div className="wrap">{tr('loading')}</div>
 
   const preset = PROVIDERS[llm.provider] || PROVIDERS.openai
+  const accounts = status.gmail.accounts || []
 
   return (
     <div className="wrap">
@@ -178,10 +313,7 @@ export default function App() {
           />
           <Chip ok={status.llm.configured} label={tr('chip_llm')} />
           <Chip ok={status.gcp.configured} label={tr('chip_gcp')} />
-          <Chip
-            ok={status.gmail.configured}
-            label={`${tr('chip_gmail')}${status.gmail.email ? ' (' + status.gmail.email + ')' : ''}`}
-          />
+          <Chip ok={status.gmail.configured} label={`${tr('chip_gmail')} (${accounts.length})`} />
         </div>
       </header>
 
@@ -207,7 +339,6 @@ export default function App() {
       <section>
         <h2>{tr('step2_title')}</h2>
         <p className="hint">{tr('step2_hint')}</p>
-
         <div className="provider-grid">
           {Object.entries(PROVIDERS).map(([key, p]) => (
             <button
@@ -220,7 +351,6 @@ export default function App() {
             </button>
           ))}
         </div>
-
         <div className="grid">
           <Field label={tr('model')}>
             <select value={llm.model} onChange={(e) => setLlm({ ...llm, model: e.target.value })}>
@@ -243,7 +373,6 @@ export default function App() {
             />
           </Field>
         </div>
-
         <details className="advanced">
           <summary>{tr('advanced')}</summary>
           <div className="grid">
@@ -283,7 +412,6 @@ export default function App() {
             </Field>
           </div>
         </details>
-
         <button onClick={saveLlm}>{tr('save_llm')}</button>
       </section>
 
@@ -327,13 +455,31 @@ export default function App() {
       <section>
         <h2>{tr('step4_title')}</h2>
         <p className="hint">{tr('step4_hint')}</p>
-        <button onClick={connectGmail} disabled={busy || !status.gcp.configured}>
-          {busy ? tr('connecting') : tr('connect')}
+        {accounts.length === 0 ? (
+          <p className="hint">{tr('no_accounts')}</p>
+        ) : (
+          <div className="account-list">
+            {accounts.map((account) => (
+              <AccountRow
+                key={account.id}
+                account={account}
+                tr={tr}
+                onSetDefault={setDefaultAccount}
+                onRename={renameAccount}
+                onRemove={removeAccount}
+              />
+            ))}
+          </div>
+        )}
+        <button onClick={addAccount} disabled={busy || !status.gcp.configured}>
+          {busy ? tr('adding_account') : tr('add_account')}
         </button>
         {!status.gcp.configured && <p className="hint warn">{tr('need_gcp')}</p>}
       </section>
 
       {status.all_done && <div className="notice ok">{tr('all_done')}</div>}
+
+      <LogsPanel tr={tr} />
     </div>
   )
 }

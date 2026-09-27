@@ -4,7 +4,16 @@ import threading
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
-from sqlalchemy import DateTime, Integer, String, Text, create_engine
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    func,
+    select,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from backend import config
@@ -29,6 +38,7 @@ _SETTINGS_FIELDS = {
     "llm_timeout",
     "llm_max_tokens",
     "llm_max_retries",
+    "features",
     "gcp_client_id",
     "gcp_client_secret",
     "gmail_refresh_token",
@@ -56,6 +66,7 @@ class Settings(Base):
     llm_max_tokens: Mapped[str] = mapped_column(String(16), default="")
     llm_max_retries: Mapped[str] = mapped_column(String(16), default="")
     llm_base_url: Mapped[str] = mapped_column(String(256), default="")
+    features: Mapped[str] = mapped_column(Text, default="{}")
     gcp_client_id: Mapped[str] = mapped_column(Text, default="")
     gcp_client_secret: Mapped[str] = mapped_column(Text, default="")
     gmail_refresh_token: Mapped[str] = mapped_column(Text, default="")
@@ -63,10 +74,24 @@ class Settings(Base):
     updated_at: Mapped[str] = mapped_column(String(64), default="")
 
 
+class GmailAccount(Base):
+    __tablename__ = "gmail_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(256), unique=True)
+    label: Mapped[str] = mapped_column(String(64), default="")
+    refresh_token: Mapped[str] = mapped_column(Text, default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class PendingSend(Base):
     __tablename__ = "pending_send"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     to_addr: Mapped[str] = mapped_column(Text)
     subject: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
@@ -108,13 +133,50 @@ def _migrate(engine) -> None:
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
-    if "settings" not in inspector.get_table_names():
-        return
-    existing = {col["name"] for col in inspector.get_columns("settings")}
-    for column in ("llm_temperature", "llm_timeout", "llm_max_tokens", "llm_max_retries"):
-        if column not in existing:
+    tables = set(inspector.get_table_names())
+
+    if "settings" in tables:
+        existing = {col["name"] for col in inspector.get_columns("settings")}
+        for column, ddl in (
+            ("llm_temperature", "VARCHAR(16) DEFAULT ''"),
+            ("llm_timeout", "VARCHAR(16) DEFAULT ''"),
+            ("llm_max_tokens", "VARCHAR(16) DEFAULT ''"),
+            ("llm_max_retries", "VARCHAR(16) DEFAULT ''"),
+            ("features", "TEXT DEFAULT '{}'"),
+        ):
+            if column not in existing:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE settings ADD COLUMN {column} {ddl}"))
+
+    if "pending_send" in tables:
+        existing = {col["name"] for col in inspector.get_columns("pending_send")}
+        if "account_id" not in existing:
             with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE settings ADD COLUMN {column} VARCHAR(16) DEFAULT ''"))
+                conn.execute(text("ALTER TABLE pending_send ADD COLUMN account_id INTEGER"))
+
+    _migrate_legacy_gmail(engine)
+
+
+def _migrate_legacy_gmail(engine) -> None:
+    with Session(engine) as session:
+        count = session.scalar(select(func.count()).select_from(GmailAccount)) or 0
+        if count:
+            return
+        row = session.get(Settings, 1)
+        if row is None or not row.gmail_refresh_token:
+            return
+        token = _decrypt(row.gmail_refresh_token)
+        if not token:
+            return
+        session.add(
+            GmailAccount(
+                email=row.gmail_email or "unknown",
+                label="",
+                refresh_token=_encrypt(token),
+                is_default=True,
+            )
+        )
+        session.commit()
 
 
 def _now() -> str:
@@ -143,6 +205,7 @@ def _serialize(row: Settings) -> dict:
         "llm_max_tokens": row.llm_max_tokens,
         "llm_max_retries": row.llm_max_retries,
         "llm_base_url": row.llm_base_url,
+        "features": row.features or "{}",
         "gcp_client_id": row.gcp_client_id,
         "gcp_client_secret": row.gcp_client_secret,
         "gmail_refresh_token": row.gmail_refresh_token,
@@ -181,16 +244,14 @@ def update_settings(**fields) -> dict:
             return _serialize(row)
 
 
-def clear_gmail() -> None:
-    update_settings(gmail_refresh_token="", gmail_email="")
-
-
 def setup_state() -> dict:
     s = get_settings()
+    account_count = count_gmail_accounts()
     bot_ok = bool(s.get("bot_token"))
     llm_ok = bool(s.get("llm_api_key"))
     gcp_ok = bool(s.get("gcp_client_id") and s.get("gcp_client_secret"))
-    gmail_ok = bool(s.get("gmail_refresh_token"))
+    gmail_ok = account_count > 0
+    default = get_gmail_account()
     return {
         "bot_configured": bot_ok,
         "bot_username": s.get("bot_username"),
@@ -198,16 +259,150 @@ def setup_state() -> dict:
         "llm_configured": llm_ok,
         "gcp_configured": gcp_ok,
         "gmail_configured": gmail_ok,
-        "gmail_email": s.get("gmail_email"),
+        "gmail_email": (default or {}).get("email", ""),
+        "gmail_account_count": account_count,
         "all_done": bot_ok and llm_ok and gcp_ok and gmail_ok,
     }
 
 
-def create_pending_send(to_addr: str, subject: str, body: str) -> int:
+# ---------------------------------------------------------------------------
+# Gmail accounts
+# ---------------------------------------------------------------------------
+
+def _account_public(row: GmailAccount) -> dict:
+    return {
+        "id": row.id,
+        "email": row.email,
+        "label": row.label or "",
+        "is_default": bool(row.is_default),
+    }
+
+
+def list_gmail_accounts() -> list[dict]:
     with _lock:
         engine = _get_engine()
         with Session(engine) as session:
-            row = PendingSend(to_addr=to_addr, subject=subject, body=body)
+            rows = session.scalars(
+                select(GmailAccount).order_by(
+                    GmailAccount.is_default.desc(), GmailAccount.id
+                )
+            ).all()
+            return [_account_public(r) for r in rows]
+
+
+def count_gmail_accounts() -> int:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            return int(session.scalar(select(func.count()).select_from(GmailAccount)) or 0)
+
+
+def get_gmail_account(account_id: int | None = None) -> dict | None:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            if account_id is not None:
+                row = session.get(GmailAccount, account_id)
+            else:
+                row = session.scalars(
+                    select(GmailAccount)
+                    .order_by(GmailAccount.is_default.desc(), GmailAccount.id)
+                ).first()
+            if row is None:
+                return None
+            data = _account_public(row)
+            data["refresh_token"] = _decrypt(row.refresh_token)
+            return data
+
+
+def add_gmail_account(email: str, refresh_token: str, label: str = "") -> int:
+    email = (email or "").strip()
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            row = session.scalars(
+                select(GmailAccount).where(GmailAccount.email == email)
+            ).first()
+            has_any = bool(session.scalar(select(func.count()).select_from(GmailAccount)))
+            if row is None:
+                row = GmailAccount(
+                    email=email,
+                    label=label or "",
+                    refresh_token=_encrypt(refresh_token),
+                    is_default=not has_any,
+                )
+                session.add(row)
+                session.commit()
+                return int(row.id)
+            row.refresh_token = _encrypt(refresh_token)
+            if label:
+                row.label = label
+            session.commit()
+            return int(row.id)
+
+
+def remove_gmail_account(account_id: int) -> None:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            row = session.get(GmailAccount, account_id)
+            if row is None:
+                return
+            was_default = bool(row.is_default)
+            session.delete(row)
+            session.commit()
+            if was_default:
+                replacement = session.scalars(
+                    select(GmailAccount).order_by(GmailAccount.id)
+                ).first()
+                if replacement is not None:
+                    replacement.is_default = True
+                    session.commit()
+
+
+def set_default_gmail_account(account_id: int) -> None:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            for row in session.scalars(select(GmailAccount)).all():
+                row.is_default = row.id == account_id
+            session.commit()
+
+
+def update_gmail_account(account_id: int, label: str | None = None) -> None:
+    if label is None:
+        return
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            row = session.get(GmailAccount, account_id)
+            if row is not None:
+                row.label = label
+                session.commit()
+
+
+def clear_gmail() -> None:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            for row in session.scalars(select(GmailAccount)).all():
+                session.delete(row)
+            session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Pending sends
+# ---------------------------------------------------------------------------
+
+def create_pending_send(
+    to_addr: str, subject: str, body: str, account_id: int | None = None
+) -> int:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            row = PendingSend(
+                to_addr=to_addr, subject=subject, body=body, account_id=account_id
+            )
             session.add(row)
             session.commit()
             return int(row.id)
@@ -222,6 +417,7 @@ def get_pending_send(pending_id: int) -> dict | None:
                 return None
             return {
                 "id": row.id,
+                "account_id": row.account_id,
                 "to_addr": row.to_addr,
                 "subject": row.subject,
                 "body": row.body,

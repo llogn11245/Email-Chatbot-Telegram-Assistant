@@ -1,38 +1,55 @@
 import os
-from pathlib import Path
 
-from dotenv import load_dotenv
+from backend import paths
 
-BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = BASE_DIR.parent
-DATA_DIR = ROOT_DIR / "data"
-FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
 
-load_dotenv(ROOT_DIR / ".env", override=False)
+APP_NAME = paths.APP_NAME
+APP_VERSION = "0.2.0"
+
+# .env chỉ dùng khi chạy dev (không ở bản đóng gói); luôn cho phép env thật ghi đè.
+if not paths.is_frozen() and load_dotenv is not None:
+    _env_file = paths.app_root() / ".env"
+    if _env_file.is_file():
+        load_dotenv(_env_file, override=False)
 
 
 def _get(name: str, default: str | None = None):
     return os.getenv(name, default)
 
 
-# Bot token KHÔNG còn đọc từ env — được nhập qua web interface và lưu (mã hoá) trong DB.
-TELEGRAM_ADMIN_ID = None
+def _get_int(name: str, default: int) -> int:
+    try:
+        return int(_get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+DATA_DIR = paths.data_dir()
+LOG_DIR = paths.log_dir()
+FRONTEND_DIST = paths.frontend_dist()
+SECRET_KEY = paths.load_or_create_secret()
+
 try:
     TELEGRAM_ADMIN_ID = int(_get("TELEGRAM_ADMIN_ID", "0") or 0) or None
 except ValueError:
     TELEGRAM_ADMIN_ID = None
 
-SECRET_KEY = _get("SECRET_KEY", "dev-secret-change-me")
-WEB_HOST = _get("WEB_HOST", "0.0.0.0")
-WEB_PORT = int(_get("WEB_PORT", "8000"))
+WEB_HOST = _get("WEB_HOST", "127.0.0.1")
+WEB_PORT = _get_int("WEB_PORT", 8756)
 WEB_URL = _get("WEB_URL", f"http://localhost:{WEB_PORT}").rstrip("/")
-REDIRECT_URI = _get("REDIRECT_URI", f"{WEB_URL}/")
+REDIRECT_URI = _get("REDIRECT_URI", f"http://localhost:{WEB_PORT}/")
 ADMIN_PASSWORD = _get("ADMIN_PASSWORD")
 RUN_MODE = _get("RUN_MODE", "both").lower()
+LOG_LEVEL = _get("LOG_LEVEL", "INFO")
+LOG_RETENTION_DAYS = _get_int("LOG_RETENTION_DAYS", 30)
 
 DATABASE_URL = _get(
     "DATABASE_URL",
-    "postgresql+psycopg://chatbot:chatbot@localhost:5432/chatbot",
+    f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}",
 )
 
 GOOGLE_CLIENT_ID = _get("GOOGLE_CLIENT_ID")

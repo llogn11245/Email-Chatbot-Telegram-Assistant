@@ -282,3 +282,89 @@ details.advanced .grid {
   background: var(--danger-soft);
   color: var(--danger);
 }
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fbfcfe;
+}
+.account-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 200px;
+}
+.account-label {
+  padding: 6px 8px;
+  font-size: 13px;
+  max-width: 260px;
+}
+.account-email {
+  color: var(--muted);
+  font-size: 12.5px;
+  padding-left: 2px;
+}
+.account-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.badge-default {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+button.ghost {
+  background: #fff;
+  color: #334155;
+  border: 1px solid var(--border);
+  padding: 7px 14px;
+  font-size: 13px;
+}
+button.ghost:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+button.ghost.danger {
+  color: var(--danger);
+  border-color: #fecaca;
+}
+button.ghost.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+.logs-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.logs-controls select {
+  max-width: 180px;
+}
+pre.logs {
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

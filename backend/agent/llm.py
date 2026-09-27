@@ -1,5 +1,3 @@
-from langchain.chat_models import init_chat_model
-
 from backend import storage
 
 PROVIDER_KEYS = {"openai", "deepseek", "anthropic", "google_genai"}
@@ -20,6 +18,9 @@ def _to_int(value, default: int) -> int:
 
 
 def build_model():
+    # Import nội bộ để giảm RAM lúc idle (chỉ nạp langchain khi thực sự gọi model).
+    from langchain.chat_models import init_chat_model
+
     settings = storage.get_settings()
     api_key = settings.get("llm_api_key")
     if not api_key:

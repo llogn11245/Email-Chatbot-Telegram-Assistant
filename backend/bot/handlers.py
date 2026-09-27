@@ -3,11 +3,12 @@ from urllib.parse import urlparse
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ErrorEvent, InlineKeyboardButton, InlineKeyboardMarkup
 
 from backend import config, i18n, storage
 from backend.agent.graph import SetupError, run_agent
 from backend.email_services import gmail_client
+from backend.observability import AppError, record_event
 
 rt = Router()
 
@@ -105,6 +106,23 @@ async def cmd_status(message: types.Message):
     await message.answer(text, reply_markup=_setup_keyboard(lang))
 
 
+@rt.message(Command("accounts"))
+async def cmd_accounts(message: types.Message):
+    if not _allowed(message.from_user.id):
+        return
+    lang = i18n.current_language()
+    accounts = storage.list_gmail_accounts()
+    if not accounts:
+        await message.answer(i18n.t("accounts_none", lang))
+        return
+    lines = []
+    for account in accounts:
+        name = account["label"] or account["email"]
+        suffix = f"  ⭐ {i18n.t('account_default', lang)}" if account["is_default"] else ""
+        lines.append(f"• {name} — {account['email']}{suffix}")
+    await message.answer(f"{i18n.t('accounts_title', lang)}\n" + "\n".join(lines))
+
+
 @rt.message(Command("language"))
 async def cmd_language(message: types.Message):
     if not _allowed(message.from_user.id):
@@ -143,8 +161,13 @@ async def handle_chat(message: types.Message):
         text = f"{i18n.t(key, lang)} {i18n.t('open_panel_hint', lang)} {config.WEB_URL}"
         await message.answer(text, reply_markup=_setup_keyboard(lang))
         return
+    except AppError as exc:
+        ref = record_event("ERROR", "bot", exc.message, code=exc.code, exc=exc)
+        await message.answer(i18n.t("error_with_ref", lang).format(ref=ref))
+        return
     except Exception as exc:
-        await message.answer(f"{i18n.t('ai_error', lang)} {exc}")
+        ref = record_event("ERROR", "bot", f"chat lỗi: {exc}", exc=exc)
+        await message.answer(i18n.t("error_with_ref", lang).format(ref=ref))
         return
 
     reply_markup = None
@@ -177,7 +200,11 @@ async def on_confirm_send(callback: types.CallbackQuery):
         return
     try:
         await asyncio.to_thread(
-            gmail_client.send_email, pending["to_addr"], pending["subject"], pending["body"]
+            gmail_client.send_email,
+            pending["to_addr"],
+            pending["subject"],
+            pending["body"],
+            pending.get("account_id"),
         )
         storage.set_pending_status(pending_id, "sent")
         await callback.answer(i18n.t("sent_ok", lang))
@@ -188,9 +215,12 @@ async def on_confirm_send(callback: types.CallbackQuery):
         await callback.message.edit_text(new_text)
     except Exception as exc:
         storage.set_pending_status(pending_id, "failed")
+        ref = record_event(
+            "ERROR", "bot", f"send_email lỗi: {exc}", exc=exc, pending=pending_id
+        )
         await callback.answer(i18n.t("send_failed", lang), show_alert=True)
         await callback.message.edit_text(
-            f"{callback.message.text or ''}\n\n❌ {i18n.t('send_failed_detail', lang)} {exc}"
+            f"{callback.message.text or ''}\n\n❌ {i18n.t('send_failed_detail', lang)} (mã {ref})"
         )
 
 
@@ -204,3 +234,11 @@ async def on_cancel_send(callback: types.CallbackQuery):
     storage.set_pending_status(pending_id, "cancelled")
     await callback.answer(i18n.t("cancelled", lang))
     await callback.message.edit_text(f"{callback.message.text or ''}\n\n❌ {i18n.t('cancelled_note', lang)}")
+
+
+@rt.errors()
+async def on_unhandled_error(event: ErrorEvent):
+    record_event(
+        "ERROR", "bot", f"unhandled: {event.exception}", exc=event.exception
+    )
+    return True

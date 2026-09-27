@@ -2,14 +2,15 @@ import json
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramUnauthorizedError
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend import config, storage
 from backend.email_services import gmail_client
+from backend.observability import AppError, record_event, set_request_id
 from backend.web import oauth
 
 _bot_manager = None
@@ -44,6 +45,10 @@ class GcpSetupBody(BaseModel):
     client_secret_json: str | None = None
 
 
+class AccountLabelBody(BaseModel):
+    label: str = ""
+
+
 def _require_admin(token: str | None = Header(default=None)) -> None:
     if config.ADMIN_PASSWORD and token != config.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Sai token quản trị.")
@@ -58,6 +63,42 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def request_context(request: Request, call_next):
+        request_id = set_request_id()
+        try:
+            response = await call_next(request)
+        except AppError as exc:
+            ref = record_event(
+                "ERROR", "web", exc.message, code=exc.code, exc=exc, path=request.url.path
+            )
+            return JSONResponse(
+                {"detail": exc.message, "event_id": ref}, status_code=400
+            )
+        except Exception as exc:
+            ref = record_event(
+                "ERROR", "web", f"{type(exc).__name__}: {exc}", exc=exc, path=request.url.path
+            )
+            return JSONResponse(
+                {"detail": "Internal server error", "event_id": ref}, status_code=500
+            )
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    @app.get("/api/logs")
+    def api_logs(limit: int = Query(default=300, ge=1, le=5000), level: str | None = None, q: str | None = None):
+        path = config.LOG_DIR / "app.log"
+        if not path.is_file():
+            return {"lines": [], "log_dir": str(config.LOG_DIR)}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if level:
+            marker = f"| {level.upper()} |"
+            lines = [line for line in lines if marker in line]
+        if q:
+            needle = q.lower()
+            lines = [line for line in lines if needle in line.lower()]
+        return {"lines": lines[-limit:], "log_dir": str(config.LOG_DIR)}
 
     @app.get("/api/status")
     def api_status():
@@ -82,7 +123,7 @@ def create_app() -> FastAPI:
             "gcp": {"configured": state["gcp_configured"]},
             "gmail": {
                 "configured": state["gmail_configured"],
-                "email": settings.get("gmail_email"),
+                "accounts": storage.list_gmail_accounts(),
             },
             "ui_language": state["ui_language"],
             "all_done": state["all_done"],
@@ -158,6 +199,38 @@ def create_app() -> FastAPI:
     def oauth_start():
         client_id, _ = oauth.get_gcp_credentials()
         return {"url": oauth.build_auth_url(client_id, config.REDIRECT_URI)}
+
+    @app.post("/api/oauth/open")
+    def oauth_open():
+        client_id, _ = oauth.get_gcp_credentials()
+        url = oauth.build_auth_url(client_id, config.REDIRECT_URI)
+        try:
+            import webbrowser
+
+            webbrowser.open(url)
+        except Exception as exc:
+            record_event("WARNING", "web", f"webbrowser.open lỗi: {exc}")
+        return {"url": url}
+
+    @app.get("/api/gmail/accounts")
+    def list_gmail_accounts():
+        return {"accounts": storage.list_gmail_accounts()}
+
+    @app.post("/api/gmail/accounts/{account_id}/default", dependencies=[Depends(_require_admin)])
+    def set_default_gmail_account(account_id: int):
+        storage.set_default_gmail_account(account_id)
+        return {"accounts": storage.list_gmail_accounts()}
+
+    @app.post("/api/gmail/accounts/{account_id}/label", dependencies=[Depends(_require_admin)])
+    def rename_gmail_account(account_id: int, body: AccountLabelBody):
+        storage.update_gmail_account(account_id, label=body.label.strip())
+        return {"accounts": storage.list_gmail_accounts()}
+
+    @app.delete("/api/gmail/accounts/{account_id}", dependencies=[Depends(_require_admin)])
+    def delete_gmail_account(account_id: int):
+        storage.remove_gmail_account(account_id)
+        gmail_client.clear_cache()
+        return {"accounts": storage.list_gmail_accounts()}
 
     @app.get("/oauth2callback")
     def oauth_callback(code: str | None = Query(default=None), error: str | None = Query(default=None)):
