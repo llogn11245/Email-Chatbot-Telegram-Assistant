@@ -1,141 +1,122 @@
 # Chatbot Gmail
 
-Ứng dụng **desktop** (Windows-first) chạy nền: trợ lý email AI qua **Telegram**. User cài một lần, mở **Settings (native GUI - Tkinter)** để cấu hình bot token, model AI và kết nối Gmail; sau đó chat với bot để tìm/đọc/tóm tắt email và soạn & gửi email (luôn có xác nhận).
+A desktop app that runs in the background and turns Telegram into an AI email assistant: search, read and summarize email, draft and send replies (always with confirmation). You configure it once in a native **Settings** window, then interact entirely through Telegram - no hosting, no public URL required.
 
-- **Chạy nền dạng tray** — không cần Docker, không cần hosting, không cần URL public.
-- **Native GUI (Tkinter/ttk)** — không dùng webview, không có front-end web.
-- **Nhiều tài khoản Gmail** với nhãn tùy chỉnh và một tài khoản mặc định.
-- **4 nhà cung cấp model:** OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google) — kèm tham số (temperature, timeout, max_tokens, max_retries).
-- **SQLite** trong thư mục dữ liệu người dùng; secrets mã hoá Fernet.
-- **Log ra file** (30 ngày) + tab **Logs** trong Settings.
-- Vi/EN.
+### How It Works:
 
-```
-Desktop app (resident)
-  ├── Runtime (thread nền): BotManager — long-poll Telegram
-  ├── Settings — native GUI (Tkinter/ttk); đóng → thu về tray, click tray mở lại
-  ├── OAuth loopback server (stdlib) — chỉ chạy khi thêm tài khoản Gmail
-  └── SQLite + Fernet trong thư mục dữ liệu người dùng
-```
+The app runs in the background from the system tray. A background thread long-polls Telegram for messages; when one arrives, the AI agent (LangGraph + tool-calling, calling your selected model provider's API) picks the right tool to search/read email through the Gmail API. Sending is not immediate: the agent composes the message, creates a draft in Gmail, and waits for you to press the confirm button in Telegram. The Settings window uses Tkinter. All data is stored locally in SQLite.
 
-## Cài đặt & chạy (dev)
+### Features:
 
-Yêu cầu: Python 3.12 (Tkinter có sẵn trong bản Python chính thức). Không cần Node.js.
+- **Telegram email assistant** — natural Q&A without opening a browser.
+- **Multiple Gmail accounts** — add several accounts, assign labels, pick a default.
+- **Safe sending (human-in-the-loop)** — creates a Gmail draft, only sends after you confirm.
+- **4 model providers** — OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google), with tunable parameters (temperature, timeout, max_tokens, max_retries).
+- **Short-term memory** per conversation; clear it with `/reset`.
+- **Primary inbox focus** — searches the Primary tab by default (skips Social/Promotions/Updates) unless you say otherwise.
+- **Background tray app** with an optional start-with-system setting.
+- **File logging** (daily rotation, kept for 30 days) plus a Logs tab to filter by level.
+- **Bilingual UI** English / Vietnamese.
+- **Local-first security** — secrets are Fernet-encrypted and stay on your machine.
 
-- Windows/macOS: Tkinter có sẵn.
-- Linux/WSL: cần `sudo apt install python3-tk` và một display (Windows 11 có WSLg).
+### Usage:
 
-```bash
-python -m venv venv
-venv/bin/pip install -r requirements.txt     # Windows: venv\Scripts\pip
-python -m app                                # chạy app desktop (native GUI + tray)
-```
+- Download and unzip the latest release (keeping the accompanying folder is recommended), then run the app.
+- The **Settings** window opens; configure it step by step:
+  1. **Telegram** — create a bot with [@BotFather](https://t.me/BotFather), paste the token, and click *Save & start*. Enable *Start with system* if you want.
+  2. **AI model** — pick a provider (OpenAI / DeepSeek / Claude / Gemini), a model, paste your API key, and adjust the parameters.
+  3. **Google / Gmail** — paste the contents of `client_secret.json` (OAuth client type **Desktop app**). See **Notes** for how to create and publish it.
+  4. **Gmail accounts** — click **Add account** and sign in with Google in your browser. Repeat to add more accounts; set labels and a default account.
+- Close the window to minimize to the tray; click the tray icon to reopen it.
+- Open Telegram and chat with the bot, e.g. *"Summarize my latest emails"*, *"Any unpaid invoices?"*, *"Draft a reply to my boss's email"*.
+- Bot commands: `/start`, `/setup`, `/status`, `/accounts`, `/language`, `/reset`.
 
-App mở cửa sổ Settings; đóng cửa sổ thì chạy nền ở khay hệ thống. Nhấn icon khay để mở lại, bật/tắt "Khởi động cùng máy", hoặc thoát.
+### Pictures:
 
-> Nếu môi trường không có display (vd dev trong WSL/Linux headless), app tự chuyển sang chế độ nền chỉ chạy bot (in hướng dẫn ra console).
+![Bot Settings](assets/bot_settings.png)
+![LLM Settings](assets/llm_settings.png)
 
-## Cấu hình (trong Settings)
+### Notes:
 
-1. **Telegram** — tạo bot với @BotFather, dán token, bấm Lưu & khởi động. Bật "Khởi động cùng máy" nếu muốn.
-2. **AI model** — chọn provider (OpenAI / DeepSeek / Claude / Gemini), model, API key; chỉnh temperature/timeout/max_tokens/max_retries.
-3. **Google / Gmail** — dán nội dung `client_secret.json` (hoặc Client ID/Secret). Bấm **Add account** để mở trình duyệt đăng nhập Google; thêm nhiều tài khoản, đặt nhãn và tài khoản mặc định.
-4. **Logs** — xem log gần đây, lọc theo mức.
+> [!WARNING]
+> The OAuth app must be in the **In production** state (in Google Cloud Console, click **Publish app**). While it stays in *Testing*, the refresh token **expires after 7 days** and you will have to reconnect.
 
-## Google OAuth client (làm 1 lần)
+> [!CAUTION]
+> `data/secret.key` is the key that decrypts every secret in `data/app.db` (bot token, LLM API key, client secret, Gmail refresh tokens). Keep this file safe and backed up; if it is lost or changed, the encrypted data can **no longer be decrypted**.
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → tạo project (không cần billing).
-2. **APIs & Services → Library** → bật **Gmail API**.
-3. **OAuth consent screen**: User type **External**; thêm email của bạn vào **Test users**.
-   - **Quan trọng:** bấm **Publish app** (In production). Nếu để *Testing*, refresh token hết hạn sau 7 ngày.
-   - Cảnh báo "chưa verified" là bình thường với scope Gmail.
-4. **Credentials → Create Credentials → OAuth client ID** → type **Desktop app** → tải JSON.
-5. Dán JSON vào tab "Google / Gmail" của Settings.
+> [!IMPORTANT]
+> The bot is only online while the app is running. When your machine is off, the bot stays silent; messages sent within ~24 hours will be processed once you start the app again.
 
-Scope dùng: `gmail.readonly` + `gmail.send`. Redirect dùng loopback `http://localhost:<port>/` (port ngẫu nhiên do app tự mở khi thêm tài khoản — Desktop client cho phép mọi port loopback).
+> [!NOTE]
+> The *Add account* button opens your **default browser** (Google blocks OAuth inside webviews). Finish signing in, then come back to the app.
 
-## Hành vi nhiều tài khoản
+> [!NOTE]
+> On Linux/WSL you need Tkinter: `sudo apt install python3-tk` (bundled on Windows/macOS). Windows 11 ships WSLg, so the GUI window can be displayed.
 
-- **Tìm kiếm:** mặc định ở **tài khoản mặc định**; chỉ tìm ở tài khoản khác khi bạn nói rõ.
-- **Đọc email:** agent dùng đúng tài khoản đã tìm ra email.
-- **Gửi email:** nếu bạn nói rõ gửi từ tài khoản nào thì dùng tài khoản đó; nếu chưa rõ và có nhiều tài khoản, bot **hỏi lại** trước khi gửi.
-- Email chỉ được gửi sau khi bạn bấm nút **Gửi** xác nhận trong Telegram.
+<!-- > [!NOTE]
+> An `OpenAIConnectionError: Connection error` while chatting is usually caused by the `brotli` package in the environment breaking decoding in `httpx2` (the HTTP library used by `openai`). Fix it with `pip uninstall -y brotli brotlicffi` — commonly seen when running from a **conda base**, so prefer a dedicated venv. -->
 
-## Dữ liệu & bảo mật
+### Notes about the Windows build:
 
-- Dữ liệu (`data/`) và log (`logs/`) nằm **ngang cấp với `app/`, `assets/`**:
-  - Khi dev: `./data` và `./logs` trong thư mục repo.
-  - Khi đóng gói: `<thư mục chứa ChatbotGmail.exe>\data` và `\logs`.
-  - Có thể đổi bằng biến môi trường `CHATBOT_DATA_DIR` (trỏ tới thư mục bất kỳ).
-- Trong `data/`: `app.db` (SQLite) + `secret.key` (khoá mã hoá) + `app.lock` (single instance).
-- **Mã hoá Fernet**: `bot_token`, `llm_api_key`, `gcp_client_secret`, `refresh_token` của từng tài khoản Gmail.
-- Không lưu nội dung email hay lịch sử hội thoại; không dùng mật khẩu Gmail (chỉ OAuth refresh token).
-- Log ở `logs/app.log` (và `error.log`), tự xoay vòng theo ngày, giữ 30 ngày.
-- Nếu trước đây đã dùng vị trí cũ (platformdirs), lần chạy đầu sẽ **tự di trú** `app.db` + `secret.key` + log sang vị trí mới.
-
-## Build bản Windows (.exe)
+- Packaged with **PyInstaller** (onedir), together with an **Inno Setup** script to build an installer.
+- Some antivirus engines (including Windows Defender) may flag the `.exe` as malicious because PyInstaller has been abused in the past; these reports can be ignored. If you don't trust it, run directly from source.
+- Use a **dedicated venv**; `pip` and `PyInstaller` must use the **same Python** (do not use a conda base). The spec fails loudly if a package is missing.
+- PyInstaller **cannot cross-compile** — the Windows build must run on Windows.
+- Build from a regular drive path (avoid UNC paths like `\\wsl.localhost\...`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 # -> dist\ChatbotGmail\ChatbotGmail.exe   (onedir)
+# (optional) build the installer: iscc packaging\windows\installer.iss
 ```
 
-Script sẽ: cài deps Python + PyInstaller → chạy PyInstaller → (tạo installer nếu có Inno Setup 6).
+Running directly from source:
 
-Chạy PyInstaller trực tiếp:
-
-```powershell
-python -m pip install -r requirements.txt pyinstaller
-python -m PyInstaller --noconfirm --clean packaging\pyinstaller\chatbot-gmail.spec
+```bash
+python -m venv venv
+venv/bin/pip install -r requirements.txt   # Windows: venv\Scripts\pip
+python -m app
 ```
 
-Lưu ý:
-- Dùng **venv riêng**; đảm bảo `pip` và `PyInstaller` dùng **cùng một Python** (không dùng conda base). Spec sẽ **báo lỗi rõ** nếu thiếu package.
-- PyInstaller **không cross-compile** — build Windows trên Windows, macOS/Linux cần build riêng.
-- Build ở đường dẫn ổ đĩa bình thường (tránh thư mục UNC kiểu `\\wsl.localhost\...`).
+### Notes about the Linux/WSL build:
 
-## Cấu trúc thư mục
+- Running from source needs Python 3.12 + Tkinter (`python3-tk`) and a display (WSLg on Windows 11).
+- The system tray (`pystray`) is **disabled on Linux** by default; in that case closing the Settings window exits the app. You can enable it with the `CHATBOT_GMAIL_TRAY=1` environment variable.
+- The Linux build uses the same PyInstaller spec but must be built on Linux itself (no cross-compilation).
+
+### Project Structure:
 
 ```
-app/
-  __main__.py            # entry: python -m app
-  core/                  # nền tảng dùng chung
-    config.py            # env + paths
-    paths.py             # platformdirs, secret key, resource path
-    storage.py           # SQLAlchemy (SQLite) + Fernet, migration
-    i18n.py              # chuỗi vi/en cho bot
-    observability/       # logging file, AppError, event_ref, context
-  auth/
-    oauth.py             # Google OAuth: consent URL, loopback callback server
-  email/
-    gmail_client.py      # Gmail API: search/read/send/profile (nhiều tài khoản)
-  agent/
-    llm.py               # init_chat_model (4 provider) — lazy import
-    tools.py             # registry tools Gmail
-    graph.py             # run_agent (lazy import langchain/langgraph), memory ngắn hạn
-  telegram/
-    manager.py           # start/stop/restart bot
-    handlers.py          # /start /setup /status /accounts /language, chat, xác nhận gửi
-  desktop/               # native GUI + tray + lifecycle
-    app.py               # DesktopApp: single-instance, tray, GUI main loop
-    gui.py               # Settings (Tkinter/ttk), 4 tab
-    runtime.py           # runtime bot (asyncio loop trong thread nền)
-    tray.py              # pystray
-    autostart.py         # Windows/macOS/Linux
-packaging/               # PyInstaller spec + Inno Setup + entry
-assets/                  # icon
+ChatbotGmail/
+├── app/                        # application source
+│   ├── __main__.py             # entry point: `python -m app`
+│   ├── core/                   # shared foundations
+│   │   ├── config.py           # environment + path configuration
+│   │   ├── paths.py            # data/logs locations, secret key, bundled resource path
+│   │   ├── storage.py          # SQLite (SQLAlchemy) + Fernet encryption + migration
+│   │   ├── i18n.py             # vi/en strings for the bot
+│   │   └── observability/      # file logging, AppError, event_ref
+│   ├── auth/oauth.py           # Google OAuth: consent URL + loopback callback server
+│   ├── email/gmail_client.py   # Gmail API: search/read/send/draft/profile (multi-account)
+│   ├── agent/                  # the AI "brain"
+│   │   ├── llm.py              # init_chat_model for the 4 providers (lazy import)
+│   │   ├── tools.py            # Gmail tools exposed to the agent
+│   │   └── graph.py            # agent loop (LangGraph) + short-term memory
+│   ├── telegram/               # Telegram bot
+│   │   ├── manager.py          # start/stop/restart the bot
+│   │   └── handlers.py         # commands, chat handling, send-confirmation buttons
+│   └── desktop/                # desktop UI
+│       ├── app.py              # app lifecycle: single-instance, tray, GUI
+│       ├── gui.py              # Settings window (Tkinter/ttk)
+│       ├── runtime.py          # runs the bot on a background thread
+│       ├── tray.py             # system tray icon
+│       └── autostart.py        # start with system (Win/mac/Linux)
+├── packaging/                  # PyInstaller spec + Inno Setup + entry point
+├── assets/                     # icon and README images
+├── data/                       # (created at runtime) app.db, secret.key, app.lock
+├── logs/                       # (created at runtime) app.log, error.log (kept 30 days)
+├── requirements.txt
+└── README.md
 ```
 
-## Hạn chế đã biết
-
-- Bot chỉ online khi app đang chạy (máy bật). Tin nhắn trong ~24h sẽ được xử lý khi app bật lại.
-- Windows-first; macOS/Linux cần `pystray` backend tương ứng (Tkinter có sẵn trong Python).
-
-## Khắc phục sự cố
-
-- **Chat bot báo `OpenAIConnectionError: Connection error` (kèm `TypeError: process() takes no keyword arguments` trong `httpx2/_decoders.py`):** đây là lỗi giải mã **brotli** của `httpx2` (thư viện HTTP mà `openai` dùng) khi server trả `Content-Encoding: br`. Bản mới đã tự gửi `Accept-Encoding: gzip, deflate` nên không còn gặp. Nếu vẫn gặp, gỡ brotli trong đúng môi trường chạy:
-  ```bash
-  pip uninstall -y brotli brotlicffi
-  ```
-  Nguyên nhân thường gặp: chạy bằng **conda base** (có sẵn `brotli`). Khuyến nghị dùng **venv riêng**.
-- **`ModuleNotFoundError: No module named 'tkinter'` (Linux/WSL):** cài `sudo apt install python3-tk` (Windows/macOS có sẵn).
+**Data location:** `data/` and `logs/` live **alongside `app/` and `assets/`** (inside the repo when developing; next to `ChatbotGmail.exe` when packaged). Override with the `CHATBOT_DATA_DIR` environment variable.
