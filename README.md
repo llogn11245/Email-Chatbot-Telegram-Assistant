@@ -63,14 +63,15 @@ Scope dùng: `gmail.readonly` + `gmail.send`. Redirect dùng loopback `http://lo
 
 ## Dữ liệu & bảo mật
 
-- Dữ liệu lưu ở thư mục người dùng (`platformdirs`):
-  - Windows: `%LOCALAPPDATA%\ChatbotGmail\`
-  - macOS: `~/Library/Application Support/ChatbotGmail/`
-  - Linux: `~/.local/share/ChatbotGmail/`
-- `app.db` (SQLite) + `secret.key` (khoá mã hoá) + `app.lock` (single instance).
+- Dữ liệu (`data/`) và log (`logs/`) nằm **ngang cấp với `app/`, `assets/`**:
+  - Khi dev: `./data` và `./logs` trong thư mục repo.
+  - Khi đóng gói: `<thư mục chứa ChatbotGmail.exe>\data` và `\logs`.
+  - Có thể đổi bằng biến môi trường `CHATBOT_DATA_DIR` (trỏ tới thư mục bất kỳ).
+- Trong `data/`: `app.db` (SQLite) + `secret.key` (khoá mã hoá) + `app.lock` (single instance).
 - **Mã hoá Fernet**: `bot_token`, `llm_api_key`, `gcp_client_secret`, `refresh_token` của từng tài khoản Gmail.
 - Không lưu nội dung email hay lịch sử hội thoại; không dùng mật khẩu Gmail (chỉ OAuth refresh token).
-- Log ở `.../ChatbotGmail/log/app.log` (và `error.log`), tự xoay vòng theo ngày, giữ 30 ngày.
+- Log ở `logs/app.log` (và `error.log`), tự xoay vòng theo ngày, giữ 30 ngày.
+- Nếu trước đây đã dùng vị trí cũ (platformdirs), lần chạy đầu sẽ **tự di trú** `app.db` + `secret.key` + log sang vị trí mới.
 
 ## Build bản Windows (.exe)
 
@@ -111,10 +112,7 @@ app/
   agent/
     llm.py               # init_chat_model (4 provider) — lazy import
     tools.py             # registry tools Gmail
-    graph.py             # run_agent (lazy import langchain/langgraph)
-    retriever.py         # Retriever protocol + NullRetriever (seam RAG)
-    embeddings.py        # seam embeddings
-    pipeline/            # state + builder
+    graph.py             # run_agent (lazy import langchain/langgraph), memory ngắn hạn
   telegram/
     manager.py           # start/stop/restart bot
     handlers.py          # /start /setup /status /accounts /language, chat, xác nhận gửi
@@ -126,14 +124,12 @@ app/
     autostart.py         # Windows/macOS/Linux
 packaging/               # PyInstaller spec + Inno Setup + entry
 assets/                  # icon
-docs/RAG_DESIGN.md       # thiết kế mở rộng RAG
 ```
 
 ## Hạn chế đã biết
 
 - Bot chỉ online khi app đang chạy (máy bật). Tin nhắn trong ~24h sẽ được xử lý khi app bật lại.
 - Windows-first; macOS/Linux cần `pystray` backend tương ứng (Tkinter có sẵn trong Python).
-- RAG chưa hiện thực — đã chừa seam (xem `docs/RAG_DESIGN.md`).
 
 ## Khắc phục sự cố
 

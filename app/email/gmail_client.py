@@ -10,6 +10,7 @@ from app.core.observability.errors import GmailError
 
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.send",
 ]
 AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
@@ -166,12 +167,45 @@ def read_email(message_id: str, max_chars: int = 8000, account_id: int | None = 
     }
 
 
-def send_email(to_addr: str, subject: str, body: str, account_id: int | None = None) -> str:
-    service = _get_service(account_id)
+def _build_raw(to_addr: str, subject: str, body: str) -> str:
     message = MIMEText(body, "plain", "utf-8")
     message["To"] = to_addr
     message["Subject"] = subject
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    return base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+
+def create_draft(to_addr: str, subject: str, body: str, account_id: int | None = None) -> str:
+    """Tạo bản nháp trong Gmail (cần scope gmail.compose). Trả về draft id."""
+    service = _get_service(account_id)
+    raw = _build_raw(to_addr, subject, body)
+    draft = (
+        service.users()
+        .drafts()
+        .create(userId="me", body={"message": {"raw": raw}})
+        .execute()
+    )
+    return draft.get("id", "")
+
+
+def send_draft(draft_id: str, account_id: int | None = None) -> str:
+    service = _get_service(account_id)
+    sent = (
+        service.users()
+        .drafts()
+        .send(userId="me", body={"id": draft_id})
+        .execute()
+    )
+    return sent.get("id", "")
+
+
+def delete_draft(draft_id: str, account_id: int | None = None) -> None:
+    service = _get_service(account_id)
+    service.users().drafts().delete(userId="me", id=draft_id).execute()
+
+
+def send_email(to_addr: str, subject: str, body: str, account_id: int | None = None) -> str:
+    service = _get_service(account_id)
+    raw = _build_raw(to_addr, subject, body)
     sent = (
         service.users()
         .messages()

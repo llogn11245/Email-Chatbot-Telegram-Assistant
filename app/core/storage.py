@@ -38,7 +38,6 @@ _SETTINGS_FIELDS = {
     "llm_timeout",
     "llm_max_tokens",
     "llm_max_retries",
-    "features",
     "gcp_client_id",
     "gcp_client_secret",
     "gmail_refresh_token",
@@ -66,7 +65,6 @@ class Settings(Base):
     llm_max_tokens: Mapped[str] = mapped_column(String(16), default="")
     llm_max_retries: Mapped[str] = mapped_column(String(16), default="")
     llm_base_url: Mapped[str] = mapped_column(String(256), default="")
-    features: Mapped[str] = mapped_column(Text, default="{}")
     gcp_client_id: Mapped[str] = mapped_column(Text, default="")
     gcp_client_secret: Mapped[str] = mapped_column(Text, default="")
     gmail_refresh_token: Mapped[str] = mapped_column(Text, default="")
@@ -92,6 +90,7 @@ class PendingSend(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    draft_id: Mapped[str] = mapped_column(String(256), default="")
     to_addr: Mapped[str] = mapped_column(Text)
     subject: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
@@ -142,7 +141,6 @@ def _migrate(engine) -> None:
             ("llm_timeout", "VARCHAR(16) DEFAULT ''"),
             ("llm_max_tokens", "VARCHAR(16) DEFAULT ''"),
             ("llm_max_retries", "VARCHAR(16) DEFAULT ''"),
-            ("features", "TEXT DEFAULT '{}'"),
         ):
             if column not in existing:
                 with engine.begin() as conn:
@@ -150,9 +148,13 @@ def _migrate(engine) -> None:
 
     if "pending_send" in tables:
         existing = {col["name"] for col in inspector.get_columns("pending_send")}
-        if "account_id" not in existing:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE pending_send ADD COLUMN account_id INTEGER"))
+        for column, ddl in (
+            ("account_id", "INTEGER"),
+            ("draft_id", "VARCHAR(256) DEFAULT ''"),
+        ):
+            if column not in existing:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE pending_send ADD COLUMN {column} {ddl}"))
 
     _migrate_legacy_gmail(engine)
 
@@ -205,7 +207,6 @@ def _serialize(row: Settings) -> dict:
         "llm_max_tokens": row.llm_max_tokens,
         "llm_max_retries": row.llm_max_retries,
         "llm_base_url": row.llm_base_url,
-        "features": row.features or "{}",
         "gcp_client_id": row.gcp_client_id,
         "gcp_client_secret": row.gcp_client_secret,
         "gmail_refresh_token": row.gmail_refresh_token,
@@ -395,17 +396,33 @@ def clear_gmail() -> None:
 # ---------------------------------------------------------------------------
 
 def create_pending_send(
-    to_addr: str, subject: str, body: str, account_id: int | None = None
+    to_addr: str,
+    subject: str,
+    body: str,
+    account_id: int | None = None,
+    draft_id: str | None = None,
 ) -> int:
     with _lock:
         engine = _get_engine()
         with Session(engine) as session:
             row = PendingSend(
-                to_addr=to_addr, subject=subject, body=body, account_id=account_id
+                to_addr=to_addr,
+                subject=subject,
+                body=body,
+                account_id=account_id,
+                draft_id=draft_id or "",
             )
             session.add(row)
             session.commit()
             return int(row.id)
+
+
+def latest_pending_id() -> int:
+    with _lock:
+        engine = _get_engine()
+        with Session(engine) as session:
+            value = session.scalar(select(func.max(PendingSend.id)))
+            return int(value or 0)
 
 
 def get_pending_send(pending_id: int) -> dict | None:
@@ -418,6 +435,7 @@ def get_pending_send(pending_id: int) -> dict | None:
             return {
                 "id": row.id,
                 "account_id": row.account_id,
+                "draft_id": row.draft_id or "",
                 "to_addr": row.to_addr,
                 "subject": row.subject,
                 "body": row.body,

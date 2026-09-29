@@ -30,6 +30,7 @@ def _get_int(name: str, default: int) -> int:
 
 DATA_DIR = paths.data_dir()
 LOG_DIR = paths.log_dir()
+paths.migrate_legacy()
 SECRET_KEY = paths.load_or_create_secret()
 
 try:

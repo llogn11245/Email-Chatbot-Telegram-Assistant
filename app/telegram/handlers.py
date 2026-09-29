@@ -128,7 +128,7 @@ async def handle_chat(message: types.Message):
         return
     lang = i18n.current_language()
     try:
-        reply, pending_id = await asyncio.to_thread(run_agent, message.text)
+        reply, pending_id = await asyncio.to_thread(run_agent, message.text, str(message.chat.id))
     except SetupError as exc:
         key = "missing_llm" if exc.missing == "llm" else "missing_gmail"
         await message.answer(f"{i18n.t(key, lang)} {_hint(lang)}")
@@ -171,13 +171,18 @@ async def on_confirm_send(callback: types.CallbackQuery):
         await callback.answer(i18n.t("already_processed", lang))
         return
     try:
-        await asyncio.to_thread(
-            gmail_client.send_email,
-            pending["to_addr"],
-            pending["subject"],
-            pending["body"],
-            pending.get("account_id"),
-        )
+        if pending.get("draft_id"):
+            await asyncio.to_thread(
+                gmail_client.send_draft, pending["draft_id"], pending.get("account_id")
+            )
+        else:
+            await asyncio.to_thread(
+                gmail_client.send_email,
+                pending["to_addr"],
+                pending["subject"],
+                pending["body"],
+                pending.get("account_id"),
+            )
         storage.set_pending_status(pending_id, "sent")
         await callback.answer(i18n.t("sent_ok", lang))
         new_text = (
@@ -201,9 +206,27 @@ async def on_cancel_send(callback: types.CallbackQuery):
         return
     lang = i18n.current_language()
     pending_id = int(callback.data.split(":", 1)[1])
+    pending = storage.get_pending_send(pending_id)
     storage.set_pending_status(pending_id, "cancelled")
+    if pending and pending.get("draft_id"):
+        try:
+            await asyncio.to_thread(
+                gmail_client.delete_draft, pending["draft_id"], pending.get("account_id")
+            )
+        except Exception as exc:
+            record_event("WARNING", "bot", f"delete_draft lỗi: {exc}")
     await callback.answer(i18n.t("cancelled", lang))
     await callback.message.edit_text(f"{callback.message.text or ''}\n\n❌ {i18n.t('cancelled_note', lang)}")
+
+
+@rt.message(Command("reset"))
+async def cmd_reset(message: types.Message):
+    if not _allowed(message.from_user.id):
+        return
+    from app.agent.graph import reset_memory
+
+    reset_memory(str(message.chat.id))
+    await message.answer(i18n.t("memory_reset", i18n.current_language()))
 
 
 @rt.errors()
