@@ -63,14 +63,15 @@ Scope dùng: `gmail.readonly` + `gmail.send`. Redirect dùng loopback `http://lo
 
 ## Dữ liệu & bảo mật
 
-- Dữ liệu lưu ở thư mục người dùng (`platformdirs`):
-  - Windows: `%LOCALAPPDATA%\ChatbotGmail\`
-  - macOS: `~/Library/Application Support/ChatbotGmail/`
-  - Linux: `~/.local/share/ChatbotGmail/`
-- `app.db` (SQLite) + `secret.key` (khoá mã hoá) + `app.lock` (single instance).
+- Dữ liệu (`data/`) và log (`logs/`) nằm **ngang cấp với `app/`, `assets/`**:
+  - Khi dev: `./data` và `./logs` trong thư mục repo.
+  - Khi đóng gói: `<thư mục chứa ChatbotGmail.exe>\data` và `\logs`.
+  - Có thể đổi bằng biến môi trường `CHATBOT_DATA_DIR` (trỏ tới thư mục bất kỳ).
+- Trong `data/`: `app.db` (SQLite) + `secret.key` (khoá mã hoá) + `app.lock` (single instance).
 - **Mã hoá Fernet**: `bot_token`, `llm_api_key`, `gcp_client_secret`, `refresh_token` của từng tài khoản Gmail.
 - Không lưu nội dung email hay lịch sử hội thoại; không dùng mật khẩu Gmail (chỉ OAuth refresh token).
-- Log ở `.../ChatbotGmail/log/app.log` (và `error.log`), tự xoay vòng theo ngày, giữ 30 ngày.
+- Log ở `logs/app.log` (và `error.log`), tự xoay vòng theo ngày, giữ 30 ngày.
+- Nếu trước đây đã dùng vị trí cũ (platformdirs), lần chạy đầu sẽ **tự di trú** `app.db` + `secret.key` + log sang vị trí mới.
 
 ## Build bản Windows (.exe)
 
