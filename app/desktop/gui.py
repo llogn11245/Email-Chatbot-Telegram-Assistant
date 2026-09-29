@@ -48,6 +48,8 @@ STRINGS = {
         "max_retries": "Max retries",
         "save": "Lưu",
         "saved": "Đã lưu.",
+        "model_current": "Đang dùng: {provider} · {model} · key {key} · temp {temperature} · timeout {timeout} · max_tokens {max_tokens} · retries {max_retries}",
+        "gcp_current": "Đang dùng OAuth client: {client_id}",
         "gcp_hint": "Dán client_secret.json hoặc nhập Client ID/Secret (OAuth client type: Desktop app).",
         "paste_json": "Nội dung client_secret.json",
         "client_id": "Client ID",
@@ -93,6 +95,8 @@ STRINGS = {
         "max_retries": "Max retries",
         "save": "Save",
         "saved": "Saved.",
+        "model_current": "Active: {provider} · {model} · key {key} · temp {temperature} · timeout {timeout} · max_tokens {max_tokens} · retries {max_retries}",
+        "gcp_current": "Active OAuth client: {client_id}",
         "gcp_hint": "Paste client_secret.json or enter Client ID/Secret (OAuth client type: Desktop app).",
         "paste_json": "client_secret.json content",
         "client_id": "Client ID",
@@ -145,13 +149,18 @@ class SettingsApp:
         self.gcp_json_var = tk.StringVar()
         self.client_id_var = tk.StringVar(value=settings.get("gcp_client_id") or "")
         self.client_secret_var = tk.StringVar(value=settings.get("gcp_client_secret") or "")
-        self.level_var = tk.StringVar()
+        self.model_summary_var = tk.StringVar()
+        self.gcp_summary_var = tk.StringVar()
+        self.level_vars = {lvl: tk.BooleanVar(value=True) for lvl in ("INFO", "WARNING", "ERROR")}
+        self.level_all_var = tk.BooleanVar(value=True)
         self._provider_labels = {label: key for key, (label, _) in PROVIDERS.items()}
         self._pending_polls = 0
 
         self._build()
         self._refresh_bot_status()
         self._refresh_accounts()
+        self._refresh_model_summary()
+        self._refresh_gcp_summary()
 
     # -- helpers -----------------------------------------------------------
     def t(self, key: str) -> str:
@@ -312,6 +321,13 @@ class SettingsApp:
             )
 
         ttk.Button(frame, text=self.t("save"), command=self._save_model).pack(anchor="w", pady=(16, 0))
+        ttk.Label(
+            frame,
+            textvariable=self.model_summary_var,
+            foreground="#0f172a",
+            wraplength=780,
+            justify="left",
+        ).pack(anchor="w", pady=(12, 0))
         return frame
 
     def _on_provider(self, _event=None) -> None:
@@ -348,7 +364,38 @@ class SettingsApp:
             llm_max_tokens=str(as_int(self.max_tokens_var.get(), 1000)),
             llm_max_retries=str(as_int(self.max_retries_var.get(), 2)),
         )
+        # Reset form để tránh rối, đồng thời hiện thông tin mô hình đang áp dụng.
+        self.provider_var.set("")
+        self.model_var.set("")
+        self.api_key_var.set("")
+        self.temperature_var.set("")
+        self.timeout_var.set("")
+        self.max_tokens_var.set("")
+        self.max_retries_var.set("")
+        self._refresh_model_summary()
         self._info(self.t("saved"))
+
+    def _refresh_model_summary(self) -> None:
+        s = storage.get_settings()
+        provider = s.get("llm_provider")
+        model = s.get("llm_model")
+        if not (provider and model):
+            self.model_summary_var.set("")
+            return
+        label = PROVIDERS.get(provider, (provider, []))[0]
+        key = s.get("llm_api_key") or ""
+        masked = f"…{key[-4:]}" if len(key) >= 4 else "(chưa có)"
+        self.model_summary_var.set(
+            self.t("model_current").format(
+                provider=label,
+                model=model,
+                key=masked,
+                temperature=s.get("llm_temperature") or "-",
+                timeout=s.get("llm_timeout") or "-",
+                max_tokens=s.get("llm_max_tokens") or "-",
+                max_retries=s.get("llm_max_retries") or "-",
+            )
+        )
 
     # -- Google / Gmail tab ------------------------------------------------
     def _tab_gmail(self) -> ttk.Frame:
@@ -364,7 +411,14 @@ class SettingsApp:
         ttk.Entry(row, textvariable=self.client_secret_var, show="*", width=52).grid(
             row=1, column=1, sticky="w", pady=4
         )
-        ttk.Button(frame, text=self.t("save"), command=self._save_gcp).pack(anchor="w", pady=(8, 12))
+        ttk.Button(frame, text=self.t("save"), command=self._save_gcp).pack(anchor="w", pady=(8, 4))
+        ttk.Label(
+            frame,
+            textvariable=self.gcp_summary_var,
+            foreground="#0f172a",
+            wraplength=780,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
 
         ttk.Label(frame, text=self.t("accounts"), font=("Segoe UI", 10, "bold")).pack(anchor="w")
         columns = ("label", "email", "default")
@@ -410,10 +464,19 @@ class SettingsApp:
             self._err("Thiếu client_id / client_secret.")
             return
         storage.update_settings(gcp_client_id=client_id, gcp_client_secret=client_secret)
-        self.client_id_var.set(client_id)
-        self.client_secret_var.set(client_secret)
+        # Reset ô nhập sau khi lưu để tránh rối.
+        self.client_id_var.set("")
+        self.client_secret_var.set("")
         self.gcp_json_var.set("")
+        self._refresh_gcp_summary()
         self._info(self.t("saved"))
+
+    def _refresh_gcp_summary(self) -> None:
+        client_id = storage.get_settings().get("gcp_client_id")
+        if not client_id:
+            self.gcp_summary_var.set("")
+            return
+        self.gcp_summary_var.set(self.t("gcp_current").format(client_id=client_id))
 
     def _selected_account_id(self):
         selection = self.accounts_tree.selection()
@@ -511,35 +574,56 @@ class SettingsApp:
         controls.pack(fill="x")
         ttk.Label(controls, text=self.t("logs_hint"), foreground="#475569").pack(side="left")
         ttk.Label(controls, text="  Level:").pack(side="left", padx=(12, 4))
-        level_box = ttk.Combobox(
+        ttk.Checkbutton(
             controls,
-            values=[self.t("level_all"), "INFO", "WARNING", "ERROR"],
-            state="readonly",
-            width=10,
-            textvariable=self.level_var,
-        )
-        level_box.set(self.t("level_all"))
-        level_box.pack(side="left")
+            text=self.t("level_all"),
+            variable=self.level_all_var,
+            command=self._toggle_all_levels,
+        ).pack(side="left")
+        for level in ("INFO", "WARNING", "ERROR"):
+            ttk.Checkbutton(
+                controls,
+                text=level,
+                variable=self.level_vars[level],
+                command=self._on_level_change,
+            ).pack(side="left", padx=(6, 0))
         ttk.Button(controls, text=self.t("refresh"), command=self._refresh_logs).pack(side="left", padx=8)
 
-        self.logs_text = ScrolledText(frame, height=26, wrap="none", font=("Consolas", 9))
-        self.logs_text.pack(fill="both", expand=True, pady=(8, 0))
+        # Kích thước cố định; văn bản dài sẽ tự xuống dòng (wrap).
+        self.logs_text = ScrolledText(frame, height=26, wrap="word", font=("Consolas", 9))
+        self.logs_text.pack(fill="x", expand=False, pady=(8, 0))
         self._refresh_logs()
         return frame
 
+    def _toggle_all_levels(self) -> None:
+        value = self.level_all_var.get()
+        for var in self.level_vars.values():
+            var.set(value)
+        self._refresh_logs()
+
+    def _on_level_change(self) -> None:
+        self.level_all_var.set(all(var.get() for var in self.level_vars.values()))
+        self._refresh_logs()
+
     def _refresh_logs(self) -> None:
-        path = config.LOG_DIR / "app.log"
-        if not path.is_file():
-            self.logs_text.delete("1.0", "end")
-            self.logs_text.insert("end", "(no log yet)\n")
-            return
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError as exc:
-            lines = [f"error reading log: {exc}"]
-        level = self.level_var.get()
-        if level in ("INFO", "WARNING", "ERROR"):
-            lines = [line for line in lines if f"| {level} |" in line]
+        selected = {lvl for lvl, var in self.level_vars.items() if var.get()}
+        if not selected:
+            lines: list[str] = []
+        else:
+            path = config.LOG_DIR / "app.log"
+            if not path.is_file():
+                lines = ["(no log yet)"]
+            else:
+                try:
+                    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                except OSError as exc:
+                    lines = [f"error reading log: {exc}"]
+                if len(selected) < len(self.level_vars):
+                    lines = [
+                        line for line in lines if any(f"| {lvl} |" in line for lvl in selected)
+                    ]
+        self.logs_text.configure(state="normal")
         self.logs_text.delete("1.0", "end")
         self.logs_text.insert("end", "\n".join(lines[-400:]))
         self.logs_text.see("end")
+        self.logs_text.configure(state="disabled")

@@ -111,10 +111,7 @@ app/
   agent/
     llm.py               # init_chat_model (4 provider) — lazy import
     tools.py             # registry tools Gmail
-    graph.py             # run_agent (lazy import langchain/langgraph)
-    retriever.py         # Retriever protocol + NullRetriever (seam RAG)
-    embeddings.py        # seam embeddings
-    pipeline/            # state + builder
+    graph.py             # run_agent (lazy import langchain/langgraph), memory ngắn hạn
   telegram/
     manager.py           # start/stop/restart bot
     handlers.py          # /start /setup /status /accounts /language, chat, xác nhận gửi
@@ -126,14 +123,12 @@ app/
     autostart.py         # Windows/macOS/Linux
 packaging/               # PyInstaller spec + Inno Setup + entry
 assets/                  # icon
-docs/RAG_DESIGN.md       # thiết kế mở rộng RAG
 ```
 
 ## Hạn chế đã biết
 
 - Bot chỉ online khi app đang chạy (máy bật). Tin nhắn trong ~24h sẽ được xử lý khi app bật lại.
 - Windows-first; macOS/Linux cần `pystray` backend tương ứng (Tkinter có sẵn trong Python).
-- RAG chưa hiện thực — đã chừa seam (xem `docs/RAG_DESIGN.md`).
 
 ## Khắc phục sự cố
 
