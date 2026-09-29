@@ -1,136 +1,145 @@
-# Chatbot Gmail — AI Agent trợ lý email qua Telegram
+# Chatbot Gmail
 
-Agent AI tự-host giúp bạn làm việc với Gmail qua **Telegram**: tìm và đọc email, tóm tắt hộp thư, soạn & gửi email (luôn có bước xác nhận của con người).
+Ứng dụng **desktop** (Windows-first) chạy nền: trợ lý email AI qua **Telegram**. User cài một lần, mở **Settings (native GUI - Tkinter)** để cấu hình bot token, model AI và kết nối Gmail; sau đó chat với bot để tìm/đọc/tóm tắt email và soạn & gửi email (luôn có xác nhận).
 
-- **Chat front:** Telegram bot
-- **Control panel:** Web (FastAPI + React) để nhập **bot token**, **API key LLM**, và kết nối Gmail — không cần cấu hình gì trong `.env` cho các phần này
-- **Agent core:** LangGraph + tool-calling, dùng model qua 4 nhà cung cấp: **OpenAI**, **DeepSeek**, **Claude** (Anthropic), **Gemini** (Google)
-- **Storage:** PostgreSQL, dữ liệu nhạy cảm mã hoá Fernet
-- **Đa ngôn ngữ:** Tiếng Việt / English (đổi trên web hoặc `/language` trong bot)
+- **Chạy nền dạng tray** — không cần Docker, không cần hosting, không cần URL public.
+- **Native GUI (Tkinter/ttk)** — không dùng webview, không có front-end web.
+- **Nhiều tài khoản Gmail** với nhãn tùy chỉnh và một tài khoản mặc định.
+- **4 nhà cung cấp model:** OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google) — kèm tham số (temperature, timeout, max_tokens, max_retries).
+- **SQLite** trong thư mục dữ liệu người dùng; secrets mã hoá Fernet.
+- **Log ra file** (30 ngày) + tab **Logs** trong Settings.
+- Vi/EN.
 
 ```
-Telegram (aiogram) ──┐
-                     ├── Agent (LangGraph + tools) ── email_services (Gmail API)
-Web UI (React) ── FastAPI ─┘         │
-                                     ▼
-                     PostgreSQL (bot token / key / token mã hoá Fernet)
+Desktop app (resident)
+  ├── Runtime (thread nền): BotManager — long-poll Telegram
+  ├── Settings — native GUI (Tkinter/ttk); đóng → thu về tray, click tray mở lại
+  ├── OAuth loopback server (stdlib) — chỉ chạy khi thêm tài khoản Gmail
+  └── SQLite + Fernet trong thư mục dữ liệu người dùng
 ```
 
-## Tính năng
+## Cài đặt & chạy (dev)
 
-- Đọc/tìm email bằng câu hỏi tự nhiên
-- Agent tự soạn nội dung trả lời
-- Email chỉ được gửi sau khi bấm nút **Gửi** xác nhận trong Telegram (human-in-the-loop)
-- Setup một lần qua web wizard; bot tự khởi động lại khi lưu token
-- Không expose cổng public: bot dùng long-polling
+Yêu cầu: Python 3.12 (Tkinter có sẵn trong bản Python chính thức). Không cần Node.js.
 
-## Yêu cầu
-
-- Docker & Docker Compose (đã gồm PostgreSQL)
-- Tài khoản Telegram (tạo bot với @BotFather)
-- Một model của OpenAI / DeepSeek / Anthropic / Google Gemini (kèm API key tương ứng)
-- Tài khoản Google + OAuth Client ID loại **Desktop app** (tạo một lần, ~10 phút)
-
-## Quickstart (Docker)
+- Windows/macOS: Tkinter có sẵn.
+- Linux/WSL: cần `sudo apt install python3-tk` và một display (Windows 11 có WSLg).
 
 ```bash
-cp .env.example .env
-# sửa .env: đổi SECRET_KEY (bắt buộc nên đổi)
-docker compose up -d --build
+python -m venv venv
+venv/bin/pip install -r requirements.txt     # Windows: venv\Scripts\pip
+python -m app                                # chạy app desktop (native GUI + tray)
 ```
 
-Mở `http://localhost:8000`, làm 4 bước:
+App mở cửa sổ Settings; đóng cửa sổ thì chạy nền ở khay hệ thống. Nhấn icon khay để mở lại, bật/tắt "Khởi động cùng máy", hoặc thoát.
 
-1. **Bot Telegram** — tạo bot với @BotFather, dán token. Hệ thống kiểm tra token rồi tự khởi động bot.
-2. **Cấu hình mô hình AI** — chọn provider (OpenAI / DeepSeek / Claude / Gemini), model và dán API key; tuỳ chỉnh temperature, timeout, max_tokens, max_retries trong mục nâng cao.
-3. **Google OAuth client** — dán nội dung `client_secret.json`.
-4. **Connect Gmail** — đăng nhập Google, cho phép.
+> Nếu môi trường không có display (vd dev trong WSL/Linux headless), app tự chuyển sang chế độ nền chỉ chạy bot (in hướng dẫn ra console).
 
-Rồi mở Telegram, nhắn bot: *"Tóm tắt 5 email mới nhất của tôi"*, hoặc `/status`, `/language`.
+## Cấu hình (trong Settings)
 
-## Lưu ý về lưu trữ (bot token & API key)
+1. **Telegram** — tạo bot với @BotFather, dán token, bấm Lưu & khởi động. Bật "Khởi động cùng máy" nếu muốn.
+2. **AI model** — chọn provider (OpenAI / DeepSeek / Claude / Gemini), model, API key; chỉnh temperature/timeout/max_tokens/max_retries.
+3. **Google / Gmail** — dán nội dung `client_secret.json` (hoặc Client ID/Secret). Bấm **Add account** để mở trình duyệt đăng nhập Google; thêm nhiều tài khoản, đặt nhãn và tài khoản mặc định.
+4. **Logs** — xem log gần đây, lọc theo mức.
 
-Bot token và API key LLM **được lưu trong PostgreSQL**, mã hoá bằng Fernet với khoá dẫn xuất từ `SECRET_KEY`. Lý do:
+## Google OAuth client (làm 1 lần)
 
-- Bot token không còn nằm trong `.env`, nên user tự-host chỉ cần thao tác trên web.
-- Khi lưu bot token, backend validate qua Telegram (`get_me`) rồi khởi động lại bot ngay trong tiến trình đang chạy.
-- `SECRET_KEY` **phải giữ cố định**; đổi nó sẽ không giải mã được dữ liệu cũ.
+1. [Google Cloud Console](https://console.cloud.google.com/) → tạo project (không cần billing).
+2. **APIs & Services → Library** → bật **Gmail API**.
+3. **OAuth consent screen**: User type **External**; thêm email của bạn vào **Test users**.
+   - **Quan trọng:** bấm **Publish app** (In production). Nếu để *Testing*, refresh token hết hạn sau 7 ngày.
+   - Cảnh báo "chưa verified" là bình thường với scope Gmail.
+4. **Credentials → Create Credentials → OAuth client ID** → type **Desktop app** → tải JSON.
+5. Dán JSON vào tab "Google / Gmail" của Settings.
 
-## Hướng dẫn tạo Google OAuth client (làm 1 lần)
+Scope dùng: `gmail.readonly` + `gmail.send`. Redirect dùng loopback `http://localhost:<port>/` (port ngẫu nhiên do app tự mở khi thêm tài khoản — Desktop client cho phép mọi port loopback).
 
-1. Vào [Google Cloud Console](https://console.cloud.google.com/) → tạo project (không cần billing).
-2. **APIs & Services → Library** → **Gmail API** → **Enable**.
-3. **OAuth consent screen**: User type **External**, điền tên app; thêm email của bạn vào **Test users**.
-   - **Quan trọng:** bấm **Publish app** (In production). Nếu để *Testing*, refresh token **hết hạn sau 7 ngày**.
-   - Cảnh báo *"Google hasn't verified this app"* là bình thường với scope Gmail.
-4. **Credentials → Create Credentials → OAuth client ID** → type **Desktop app** → **Download JSON**.
-5. Dán nội dung JSON vào bước 3 của web wizard.
+## Hành vi nhiều tài khoản
 
-Scope dùng: `gmail.readonly` + `gmail.send`.
+- **Tìm kiếm:** mặc định ở **tài khoản mặc định**; chỉ tìm ở tài khoản khác khi bạn nói rõ.
+- **Đọc email:** agent dùng đúng tài khoản đã tìm ra email.
+- **Gửi email:** nếu bạn nói rõ gửi từ tài khoản nào thì dùng tài khoản đó; nếu chưa rõ và có nhiều tài khoản, bot **hỏi lại** trước khi gửi.
+- Email chỉ được gửi sau khi bạn bấm nút **Gửi** xác nhận trong Telegram.
 
-## Biến môi trường
+## Dữ liệu & bảo mật
 
-| Biến | Bắt buộc | Mô tả |
-|---|---|---|
-| `SECRET_KEY` | Có | Khoá mã hoá dữ liệu. Tạo: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `DATABASE_URL` | Có | Mặc định `postgresql+psycopg://chatbot:chatbot@localhost:5432/chatbot` (Docker tự trỏ vào service `db`) |
-| `TELEGRAM_ADMIN_ID` | Không | Nếu set, chỉ chat_id này được dùng bot |
-| `WEB_HOST` / `WEB_PORT` | Không | Mặc định `0.0.0.0` / `8000` |
-| `WEB_URL` | Không | URL control panel hiển thị cho user |
-| `RUN_MODE` | Không | `both` (mặc định), `bot`, `web` |
-| `ADMIN_PASSWORD` | Không | Nếu set, API setup cần header `X-Admin-Token` |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Không | Đặt qua env để bỏ qua bước 3 |
+- Dữ liệu lưu ở thư mục người dùng (`platformdirs`):
+  - Windows: `%LOCALAPPDATA%\ChatbotGmail\`
+  - macOS: `~/Library/Application Support/ChatbotGmail/`
+  - Linux: `~/.local/share/ChatbotGmail/`
+- `app.db` (SQLite) + `secret.key` (khoá mã hoá) + `app.lock` (single instance).
+- **Mã hoá Fernet**: `bot_token`, `llm_api_key`, `gcp_client_secret`, `refresh_token` của từng tài khoản Gmail.
+- Không lưu nội dung email hay lịch sử hội thoại; không dùng mật khẩu Gmail (chỉ OAuth refresh token).
+- Log ở `.../ChatbotGmail/log/app.log` (và `error.log`), tự xoay vòng theo ngày, giữ 30 ngày.
 
-> `BOT_TOKEN` và `LLM_*` trong `.env` **không còn được dùng** — nhập qua web.
+## Build bản Windows (.exe)
 
-## Chạy không cần Docker (dev)
-
-Cần một PostgreSQL (local hoặc container), rồi:
-
-```bash
-cp .env.example .env            # đổi SECRET_KEY, trỏ DATABASE_URL tới DB của bạn
-venv/bin/pip install -r requirements.txt
-venv/bin/python -m backend.main # web http://localhost:8000 + bot
-
-cd frontend && npm install && npm run dev   # http://localhost:5173, proxy /api -> :8000
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
+# -> dist\ChatbotGmail\ChatbotGmail.exe   (onedir)
 ```
+
+Script sẽ: cài deps Python + PyInstaller → chạy PyInstaller → (tạo installer nếu có Inno Setup 6).
+
+Chạy PyInstaller trực tiếp:
+
+```powershell
+python -m pip install -r requirements.txt pyinstaller
+python -m PyInstaller --noconfirm --clean packaging\pyinstaller\chatbot-gmail.spec
+```
+
+Lưu ý:
+- Dùng **venv riêng**; đảm bảo `pip` và `PyInstaller` dùng **cùng một Python** (không dùng conda base). Spec sẽ **báo lỗi rõ** nếu thiếu package.
+- PyInstaller **không cross-compile** — build Windows trên Windows, macOS/Linux cần build riêng.
+- Build ở đường dẫn ổ đĩa bình thường (tránh thư mục UNC kiểu `\\wsl.localhost\...`).
 
 ## Cấu trúc thư mục
 
 ```
-backend/
-  config.py              # env config
-  storage.py             # PostgreSQL (SQLAlchemy) + Fernet
-  i18n.py                # chuỗi vi/en cho bot
-  main.py                # chạy đồng thời web + bot (RUN_MODE)
-  email_services/        # dịch vụ email
-    gmail_client.py      # Gmail API: search/read/send/profile + scopes
-  web/                   # giao diện web + luồng OAuth
-    __init__.py          # export app/create_app/set_bot_manager
-    webapp.py            # FastAPI: /api/status, /api/setup/*
-    oauth.py             # consent URL, đổi code, callback Gmail
-  bot/
-    manager.py           # start/stop/restart bot khi token thay đổi
-    handlers.py          # Telegram: /setup /status /language, chat, xác nhận gửi
+app/
+  __main__.py            # entry: python -m app
+  core/                  # nền tảng dùng chung
+    config.py            # env + paths
+    paths.py             # platformdirs, secret key, resource path
+    storage.py           # SQLAlchemy (SQLite) + Fernet, migration
+    i18n.py              # chuỗi vi/en cho bot
+    observability/       # logging file, AppError, event_ref, context
+  auth/
+    oauth.py             # Google OAuth: consent URL, loopback callback server
+  email/
+    gmail_client.py      # Gmail API: search/read/send/profile (nhiều tài khoản)
   agent/
-    llm.py               # init_chat_model (OpenAI/DeepSeek/Anthropic/Gemini) + tham số
-    tools.py             # search_emails, read_email, request_send_email
-    graph.py             # create_react_agent (LangGraph)
-frontend/                # React (Vite) control panel + i18n
-docker-compose.yml       # app + PostgreSQL
-Dockerfile
+    llm.py               # init_chat_model (4 provider) — lazy import
+    tools.py             # registry tools Gmail
+    graph.py             # run_agent (lazy import langchain/langgraph)
+    retriever.py         # Retriever protocol + NullRetriever (seam RAG)
+    embeddings.py        # seam embeddings
+    pipeline/            # state + builder
+  telegram/
+    manager.py           # start/stop/restart bot
+    handlers.py          # /start /setup /status /accounts /language, chat, xác nhận gửi
+  desktop/               # native GUI + tray + lifecycle
+    app.py               # DesktopApp: single-instance, tray, GUI main loop
+    gui.py               # Settings (Tkinter/ttk), 4 tab
+    runtime.py           # runtime bot (asyncio loop trong thread nền)
+    tray.py              # pystray
+    autostart.py         # Windows/macOS/Linux
+packaging/               # PyInstaller spec + Inno Setup + entry
+assets/                  # icon
+docs/RAG_DESIGN.md       # thiết kế mở rộng RAG
 ```
-
-## Bảo mật
-
-- Bot token, API key LLM, client secret Google, refresh token Gmail đều **mã hoá Fernet** trong PostgreSQL.
-- Telegram bot giới hạn theo `TELEGRAM_ADMIN_ID`.
-- Agent **không thể tự gửi email** — mọi lượt gửi phải bấm xác nhận trong Telegram.
-- Scopes Gmail tối thiểu (readonly + send).
-- Không cần mở cổng ra Internet.
 
 ## Hạn chế đã biết
 
-- Hỗ trợ 4 nhà cung cấp: OpenAI, DeepSeek, Claude (Anthropic), Gemini (Google).
-- App Google chưa verify nên consent screen có cảnh báo (không ảnh hưởng hoạt động).
-- Không lưu lịch sử hội thoại giữa các lần khởi động.
+- Bot chỉ online khi app đang chạy (máy bật). Tin nhắn trong ~24h sẽ được xử lý khi app bật lại.
+- Windows-first; macOS/Linux cần `pystray` backend tương ứng (Tkinter có sẵn trong Python).
+- RAG chưa hiện thực — đã chừa seam (xem `docs/RAG_DESIGN.md`).
+
+## Khắc phục sự cố
+
+- **Chat bot báo `OpenAIConnectionError: Connection error` (kèm `TypeError: process() takes no keyword arguments` trong `httpx2/_decoders.py`):** đây là lỗi giải mã **brotli** của `httpx2` (thư viện HTTP mà `openai` dùng) khi server trả `Content-Encoding: br`. Bản mới đã tự gửi `Accept-Encoding: gzip, deflate` nên không còn gặp. Nếu vẫn gặp, gỡ brotli trong đúng môi trường chạy:
+  ```bash
+  pip uninstall -y brotli brotlicffi
+  ```
+  Nguyên nhân thường gặp: chạy bằng **conda base** (có sẵn `brotli`). Khuyến nghị dùng **venv riêng**.
+- **`ModuleNotFoundError: No module named 'tkinter'` (Linux/WSL):** cài `sudo apt install python3-tk` (Windows/macOS có sẵn).

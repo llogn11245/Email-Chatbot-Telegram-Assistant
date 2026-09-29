@@ -14,9 +14,9 @@ venv/
 # Data
 data/
 
-# Frontend
-node_modules/
-frontend/dist/
+# Build outputs
+/build/
+/dist/
 
 # IDE / OS
 .idea/
