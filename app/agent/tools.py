@@ -92,7 +92,3 @@ def request_send_email(to: str, subject: str, body: str, account: str | None = N
 
 
 TOOLS = [list_gmail_accounts, search_emails, read_email, request_send_email]
-
-
-def get_tools(settings=None):
-    return list(TOOLS)
